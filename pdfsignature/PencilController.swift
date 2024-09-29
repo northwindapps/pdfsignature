@@ -272,8 +272,11 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         canvasView.tool = penTool
         if let screenshot = takeScreenshot(of: imageView, with: canvasView) {
             
-            if let pdfData = saveStrokeToPDF() {
-                //pdfEmail(data: pdfData)
+//            if let pdfData = saveStrokeToPDF() {
+//                pdfEmail(data: pdfData)
+//            }
+            
+            if let pdfData = createPDFWithImageAndVector(image: strokeHistoryView.image!, pageIndex: 0){
                 pdfEmail(data: pdfData)
             }
             
@@ -368,8 +371,7 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     }
 
     func saveStrokeToPDF() -> Data? {
-        guard let existingPDF = DocumentManager.shared.document,
-              let pdfDocument = PDFDocument(url: DocumentManager.shared.documentURL!) else {
+        guard let pdfDocument = PDFDocument(url: DocumentManager.shared.documentURL!) else {
             print("No existing PDF document found.")
             return nil
         }
@@ -513,6 +515,79 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         
         return pngImages
     }
+    
+
+    func createPDFWithImageAndVector(image: UIImage, pageIndex: Int) -> Data? {
+        guard let pdfDocument = PDFDocument(url: DocumentManager.shared.documentURL!) else {
+                print("Failed to load the existing PDF.")
+                return nil
+            }
+            
+            // Get the page where you want to add the drawing
+            guard let pdfPage = pdfDocument.page(at: pageIndex) else {
+                print("Page at index \(pageIndex) not found.")
+                return nil
+            }
+
+            // Get the page bounds to match the drawings to the correct area
+            let pageBounds = pdfPage.bounds(for: .mediaBox)
+
+            // Create a new PDF page context for rendering
+            let pdfPageRenderer = UIGraphicsPDFRenderer(bounds: pageBounds)
+            let pdfData = pdfPageRenderer.pdfData { context in
+                context.beginPage()
+                
+                let ctx = context.cgContext
+                
+                // Apply vertical flip transformation to match UIKit's coordinate system
+                ctx.saveGState() // Save the current graphics state
+                ctx.translateBy(x: 0, y: pageBounds.height)
+                ctx.scaleBy(x: 1.0, y: -1.0)
+                
+                // Draw the existing PDF page content first
+                pdfPage.draw(with: .mediaBox, to: ctx)
+                
+                // Restore the flipped context to prevent affecting future drawings
+                ctx.restoreGState()
+
+                // Now draw your vector graphics and images as needed
+                
+                // Draw a rectangle as a vector graphic
+                ctx.setStrokeColor(UIColor.red.cgColor)
+                ctx.setLineWidth(2.0)
+                ctx.addRect(CGRect(x: 100, y: 100, width: 400, height: 600))
+                ctx.strokePath()
+
+                // Draw a circle as a vector graphic
+                ctx.setStrokeColor(UIColor.blue.cgColor)
+                ctx.setLineWidth(2.0)
+                ctx.addEllipse(in: CGRect(x: 200, y: 200, width: 200, height: 200))
+                ctx.strokePath()
+
+                // Draw the image (Apply flipping for the image)
+                let imageRect = CGRect(x: 150, y: 350, width: 300, height: 300) // Adjust the position and size as needed
+                ctx.saveGState() // Save current state for flipping image
+                ctx.translateBy(x: 0, y: pageBounds.height) // Apply the vertical flip
+                ctx.scaleBy(x: 1.0, y: -1.0)
+                if let cgImage = image.cgImage {
+                    ctx.draw(cgImage, in: imageRect)
+                } else {
+                    print("Failed to convert UIImage to CGImage.")
+                }
+                ctx.restoreGState() // Restore after drawing the image
+            }
+
+            return pdfData
+        }
+
+//    // Usage
+//    if let pdfData = createPDFWithImageAndVector() {
+//        // Save or use the pdfData as needed
+//        print("PDF created successfully with image and vector graphics!")
+//    } else {
+//        print("Failed to create PDF.")
+//    }
+
     
 }
 extension UIView {
