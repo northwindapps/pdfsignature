@@ -98,6 +98,8 @@ class iCloudController: UIViewController,UIDocumentMenuDelegate,UIDocumentPicker
                     DocumentManager.shared.document = firstImage
                 }
             }
+            
+            DocumentManager.shared.pdfDocument = PDFDocument(url: pdfURL)
         }
         
         let targetViewController = self.storyboard!.instantiateViewController( withIdentifier: "initialview" ) as! ViewController//Landscape

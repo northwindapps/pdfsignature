@@ -161,11 +161,23 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             present(mail, animated: true, completion: nil)
         }
     }
-    
-    func mailComposeController(_ controller: MFMailComposeViewController, didFinishWith result: MFMailComposeResult, error: Error?) {
-            controller.dismiss(animated: true, completion: nil)
-    }
 
+    func mailComposeController(_ controller: MFMailComposeViewController, didFinishWith result: MFMailComposeResult, error: Error?) {
+        switch result {
+        case .cancelled:
+            print("Mail cancelled")
+        case .saved:
+            print("Mail saved as draft")
+        case .sent:
+            print("Mail sent successfully")
+        case .failed:
+            print("Mail failed: \(error?.localizedDescription ?? "Unknown error")")
+        @unknown default:
+            print("Unknown result")
+        }
+
+        controller.dismiss(animated: true, completion: nil)
+    }
     
     @objc func handleNotification() {
         print("Notification received in ViewController!")
@@ -276,6 +288,16 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
 //                pdfEmail(data: pdfData)
 //            }
             
+            if let strokeView = strokeHistoryView {
+                let strokeViewSize = strokeView.frame.size
+                print("Stroke view size: \(strokeViewSize)")
+            }
+            
+            if let canvasView = canvasView {
+                let canvasViewSize = canvasView.frame.size
+                print("Canvas view size: \(canvasViewSize)")
+            }
+            
             if let pdfData = createPDFWithImageAndVector(image: strokeHistoryView.image!, pageIndex: 0){
                 pdfEmail(data: pdfData)
             }
@@ -338,7 +360,7 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     
     func takeScreenshot(of imageView: UIImageView, with canvasView: UIView) -> UIImage? {
         let imageViewSize = imageView.bounds.size
-        let scale: CGFloat = 3.0 // 4x resolution for higher quality
+        let scale: CGFloat = 2.0 // 4x resolution for higher quality
 
         // Create a renderer with the scaled size for high resolution
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: imageViewSize.width * scale, height: imageViewSize.height * scale))
@@ -371,8 +393,15 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     }
 
     func saveStrokeToPDF() -> Data? {
-        guard let pdfDocument = PDFDocument(url: DocumentManager.shared.documentURL!) else {
+        print("url", DocumentManager.shared.documentURL)
+        guard let pdfDocument = DocumentManager.shared.pdfDocument else {
             print("No existing PDF document found.")
+            
+            // Check if the file exists
+            if !FileManager.default.fileExists(atPath: DocumentManager.shared.documentURL!.path) {
+                        print("File does not exist at the specified path.")
+                        return nil
+                    }
             return nil
         }
 
@@ -518,7 +547,7 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     
 
     func createPDFWithImageAndVector(image: UIImage, pageIndex: Int) -> Data? {
-        guard let pdfDocument = PDFDocument(url: DocumentManager.shared.documentURL!) else {
+        guard let pdfDocument = DocumentManager.shared.pdfDocument else {
                 print("Failed to load the existing PDF.")
                 return nil
             }
@@ -536,46 +565,44 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             let pdfPageRenderer = UIGraphicsPDFRenderer(bounds: pageBounds)
             let pdfData = pdfPageRenderer.pdfData { context in
                 context.beginPage()
-                
+
                 let ctx = context.cgContext
-                
+
                 // Apply vertical flip transformation to match UIKit's coordinate system
-                ctx.saveGState() // Save the current graphics state
+                ctx.saveGState()
                 ctx.translateBy(x: 0, y: pageBounds.height)
                 ctx.scaleBy(x: 1.0, y: -1.0)
-                
+
                 // Draw the existing PDF page content first
                 pdfPage.draw(with: .mediaBox, to: ctx)
-                
-                // Restore the flipped context to prevent affecting future drawings
+
+                // Restore the flipped context
                 ctx.restoreGState()
 
-                // Now draw your vector graphics and images as needed
-                
-                // Draw a rectangle as a vector graphic
-                ctx.setStrokeColor(UIColor.red.cgColor)
-                ctx.setLineWidth(2.0)
-                ctx.addRect(CGRect(x: 100, y: 100, width: 400, height: 600))
-                ctx.strokePath()
+                // Calculate scale factor to fit the image into the PDF page
+                let scaleX = pageBounds.width / image.size.width
+                let scaleY = pageBounds.height / image.size.height
+                let scale = min(scaleX, scaleY)
 
-                // Draw a circle as a vector graphic
-                ctx.setStrokeColor(UIColor.blue.cgColor)
-                ctx.setLineWidth(2.0)
-                ctx.addEllipse(in: CGRect(x: 200, y: 200, width: 200, height: 200))
-                ctx.strokePath()
+                // Calculate the new size and position for the image
+                let scaledWidth = image.size.width * scale
+                let scaledHeight = image.size.height * scale
+                let imageX = (pageBounds.width - scaledWidth) / 2 // Center horizontally
+                let imageY = (pageBounds.height - scaledHeight + 120)
 
-                // Draw the image (Apply flipping for the image)
-                let imageRect = CGRect(x: 150, y: 350, width: 300, height: 300) // Adjust the position and size as needed
+                // Draw the image
                 ctx.saveGState() // Save current state for flipping image
                 ctx.translateBy(x: 0, y: pageBounds.height) // Apply the vertical flip
                 ctx.scaleBy(x: 1.0, y: -1.0)
                 if let cgImage = image.cgImage {
+                    let imageRect = CGRect(x: imageX, y: imageY, width: scaledWidth, height: scaledHeight)
                     ctx.draw(cgImage, in: imageRect)
                 } else {
                     print("Failed to convert UIImage to CGImage.")
                 }
                 ctx.restoreGState() // Restore after drawing the image
             }
+
 
             return pdfData
         }
