@@ -260,8 +260,8 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     
     @objc func saveStroke() {
         canvasView.becomeFirstResponder()
-//        let penTool = PKInkingTool(.pen, color: .black, width: 2)
-//        canvasView.tool = penTool
+        let penTool = PKInkingTool(.pen, color: .black, width: 1)
+        canvasView.tool = penTool
         if let screenshot = takeScreenshot(of: imageView, with: canvasView) {
             imageView.image = screenshot
             canvasView.drawing = PKDrawing()
@@ -346,7 +346,7 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     
     func takeScreenshot(of imageView: UIImageView, with canvasView: UIView) -> UIImage? {
         let imageViewSize = imageView.bounds.size
-        let scale: CGFloat = 3.0 // 4x resolution for higher quality
+        let scale: CGFloat = 2.0 // 4x resolution for higher quality
 
         // Create a renderer with the scaled size for high resolution
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: imageViewSize.width * scale, height: imageViewSize.height * scale))
