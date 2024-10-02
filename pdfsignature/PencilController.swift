@@ -34,12 +34,8 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         if let firstImage = DocumentManager.shared.document {
             imageView = UIImageView(image: firstImage)
             imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            scrollView.addSubview(imageView)
-            imageView.contentMode = .scaleAspectFit
-            //initialize
-            strokeHistoryView =  UIImageView(image: firstImage)
-            strokeHistoryView.image = UIImage()
             
+            imageView.contentMode = .scaleAspectFit
             // Create an empty, transparent image using UIGraphics with the same size as firstImage
             UIGraphicsBeginImageContextWithOptions(firstImage.size, false, firstImage.scale)
             let transparentImage = UIGraphicsGetImageFromCurrentImageContext()
@@ -48,6 +44,8 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             // Initialize strokeHistoryView with the transparent image
             strokeHistoryView = UIImageView(image: transparentImage)
             print("sizes", imageView.image?.size, strokeHistoryView.image?.size)
+            scrollView.addSubview(strokeHistoryView)
+            scrollView.addSubview(imageView)
         }
 
         if DocumentManager.shared.documentURL == nil {
@@ -162,10 +160,8 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
 
             // Set the subject
             mail.setSubject("Here's your PDF")
-
             // Attach PDF file (Update MIME type to "application/pdf")
             mail.addAttachmentData(data, mimeType: "application/pdf", fileName: "document-\(date).pdf")
-
             // Present the mail composer
             present(mail, animated: true, completion: nil)
         }
@@ -294,7 +290,7 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     @objc func exportPDF() {
         let penTool = PKInkingTool(.pen, color: .black, width: 1)
         canvasView.tool = penTool
-        if let screenshot = takeScreenshot(of: imageView, with: canvasView) {
+        if takeScreenshot(of: imageView, with: canvasView) != nil {
             
 //            if let pdfData = saveStrokeToPDF() {
 //                pdfEmail(data: pdfData)
@@ -531,6 +527,11 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             return nil
         }
         
+        print("canvasView", canvasView.frame.size)
+        print("scrollView", scrollView.contentSize)
+        print("strokeHistory", strokeHistoryView.frame.size)
+        
+        
         // Get the page where you want to add the drawing
         guard let pdfPage = pdfDocument.page(at: pageIndex) else {
             print("Page at index \(pageIndex) not found.")
@@ -569,8 +570,7 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             let scaledWidth = image.size.width * scale
             let scaledHeight = image.size.height * scale
             let imageX = (pageBounds.width - scaledWidth) / 2 // Center horizontally
-            let imageY = 120.0 // Center vertically wtf
-            print("imageY",imageY)
+            let imageY = 0.0
 
             // Draw the image
             ctx.saveGState() // Save current state for flipping image
