@@ -12,6 +12,7 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     var timer: Timer?
     var id = ""
     var imageView: UIImageView!
+    var strokeHistoryView: UIImageView!
     var saveButton: UIButton!
     var inputBtn:UIButton!
     var inputMode = false
@@ -35,6 +36,18 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             scrollView.addSubview(imageView)
             imageView.contentMode = .scaleAspectFit
+            //initialize
+            strokeHistoryView =  UIImageView(image: firstImage)
+            strokeHistoryView.image = UIImage()
+            
+            // Create an empty, transparent image using UIGraphics with the same size as firstImage
+            UIGraphicsBeginImageContextWithOptions(firstImage.size, false, firstImage.scale)
+            let transparentImage = UIGraphicsGetImageFromCurrentImageContext()
+            UIGraphicsEndImageContext()
+
+            // Initialize strokeHistoryView with the transparent image
+            strokeHistoryView = UIImageView(image: transparentImage)
+            print("sizes", imageView.image?.size, strokeHistoryView.image?.size)
         }
 
         if DocumentManager.shared.documentURL == nil {
@@ -267,24 +280,38 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             canvasView.drawing = PKDrawing()
             saveButton.isHidden = true
         }
+        
+        //save on SHV
+        if let screenshot = takeScreenshot(of: strokeHistoryView, with: canvasView) {
+            strokeHistoryView.image = screenshot
+            strokeHistoryView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            strokeHistoryView.contentMode = .scaleAspectFit
+        }
         print("imageViewImage",imageView.image!.size)
+        print("strokeHistoryViewImage",strokeHistoryView.image!.size)
     }
     
     @objc func exportPDF() {
-        let penTool = PKInkingTool(.pen, color: .black, width: 2)
+        let penTool = PKInkingTool(.pen, color: .black, width: 1)
         canvasView.tool = penTool
         if let screenshot = takeScreenshot(of: imageView, with: canvasView) {
             
 //            if let pdfData = saveStrokeToPDF() {
 //                pdfEmail(data: pdfData)
 //            }
+
             
+            if let strokeView = strokeHistoryView {
+                let strokeViewSize = strokeView.frame.size
+                print("Stroke view size: \(strokeViewSize)")
+            }
+
             if let canvasView = canvasView {
                 let canvasViewSize = canvasView.frame.size
                 print("Canvas view size: \(canvasViewSize)")
             }
             
-            if let pdfData = createPDFWithImageAndVector(image: imageView.image!, pageIndex: 0){
+            if let pdfData = createPDFWithImageAndVector(image: strokeHistoryView.image!, pageIndex: 0){
                 pdfEmail(data: pdfData)
             }
             
@@ -345,8 +372,9 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     }
     
     func takeScreenshot(of imageView: UIImageView, with canvasView: UIView) -> UIImage? {
-        let imageViewSize = imageView.bounds.size
         let scale: CGFloat = 2.0 // 4x resolution for higher quality
+        let imageViewSize = imageView.bounds.size
+        
 
         // Create a renderer with the scaled size for high resolution
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: imageViewSize.width * scale, height: imageViewSize.height * scale))
@@ -377,41 +405,6 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
 
         return image
     }
-
-//    func saveStrokeToPDF() -> Data? {
-//        print("url", DocumentManager.shared.documentURL)
-//        guard let pdfDocument = DocumentManager.shared.pdfDocument else {
-//            print("No existing PDF document found.")
-//            
-//            // Check if the file exists
-//            if !FileManager.default.fileExists(atPath: DocumentManager.shared.documentURL!.path) {
-//                        print("File does not exist at the specified path.")
-//                        return nil
-//                    }
-//            return nil
-//        }
-//
-//        // Create a renderer to capture the canvas view
-//        let renderer = UIGraphicsImageRenderer(size: strokeHistoryView.bounds.size)
-//
-//        // Get the first page of the PDF
-//        if let pdfPage = pdfDocument.page(at: 0) {
-//            let pdfPageBounds = pdfPage.bounds(for: .mediaBox)
-//
-//            // Resize the canvas image to match the PDF page size
-//            if let resizedCanvasImage = resizeImage(image: strokeHistoryView.image!, targetSize: pdfPageBounds.size) {
-//                // Create a new annotation
-//                let imageBounds = CGRect(x: 0, y: 0, width: pdfPageBounds.width, height: pdfPageBounds.height)
-//                let annotation = PDFImageAnnotation(resizedCanvasImage, bounds: imageBounds, properties: nil)
-//
-//                // Add the annotation to the page
-//                pdfPage.addAnnotation(annotation)
-//            }
-//        }
-//
-//        // Return the modified PDF as Data
-//        return pdfDocument.dataRepresentation()
-//    }
     
 
     // Helper function to resize the image to match the PDF page size
@@ -576,7 +569,8 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             let scaledWidth = image.size.width * scale
             let scaledHeight = image.size.height * scale
             let imageX = (pageBounds.width - scaledWidth) / 2 // Center horizontally
-            let imageY = (pageBounds.height - scaledHeight) / 2 // Center vertically
+            let imageY = 120.0 // Center vertically wtf
+            print("imageY",imageY)
 
             // Draw the image
             ctx.saveGState() // Save current state for flipping image

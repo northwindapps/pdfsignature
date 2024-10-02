@@ -17,6 +17,7 @@
 		2B580B0E2CA6F669003FF5D0 /* ImageAnnotation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B580B0D2CA6F648003FF5D0 /* ImageAnnotation.swift */; };
 		2BC5346D2C9B9E97000FD5F1 /* iCloudController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BC5346C2C9B9E97000FD5F1 /* iCloudController.swift */; };
 		2BC5346F2C9C17B9000FD5F1 /* DocumentManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BC5346E2C9C17B9000FD5F1 /* DocumentManager.swift */; };
+		2BE9702D2CAC3A9E007F83C3 /* somePDFv101.pdf in Resources */ = {isa = PBXBuildFile; fileRef = 2BE9702C2CAC3A9E007F83C3 /* somePDFv101.pdf */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 		2B580B0D2CA6F648003FF5D0 /* ImageAnnotation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageAnnotation.swift; sourceTree = "<group>"; };
 		2BC5346C2C9B9E97000FD5F1 /* iCloudController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iCloudController.swift; sourceTree = "<group>"; };
 		2BC5346E2C9C17B9000FD5F1 /* DocumentManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentManager.swift; sourceTree = "<group>"; };
+		2BE9702C2CAC3A9E007F83C3 /* somePDFv101.pdf */ = {isa = PBXFileReference; lastKnownFileType = image.pdf; path = somePDFv101.pdf; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -75,6 +77,7 @@
 				2B08EAC02C9AD2C600A593E3 /* Assets.xcassets */,
 				2B08EAC22C9AD2C600A593E3 /* LaunchScreen.storyboard */,
 				2B08EAC52C9AD2C600A593E3 /* Info.plist */,
+				2BE9702C2CAC3A9E007F83C3 /* somePDFv101.pdf */,
 			);
 			path = pdfsignature;
 			sourceTree = "<group>";
@@ -138,6 +141,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				2B08EAC12C9AD2C600A593E3 /* Assets.xcassets in Resources */,
+				2BE9702D2CAC3A9E007F83C3 /* somePDFv101.pdf in Resources */,
 				2B08EAC42C9AD2C600A593E3 /* Base in Resources */,
 				2B08EABF2C9AD2C400A593E3 /* Base in Resources */,
 			);
@@ -317,13 +321,14 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.yumiya.pdfsignature;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -348,13 +353,14 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.yumiya.pdfsignature;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
