@@ -22,11 +22,11 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         super.viewDidLoad()
         setupActivityIndicator()
         activityIndicator.startAnimating()
-        let topMargin: CGFloat = 60
+        let topMargin: CGFloat = 120
 
         // Create UIScrollView with margin
         scrollView = UIScrollView(frame: CGRect(x: 0, y: topMargin, width: view.bounds.width, height: view.bounds.height - topMargin))
-        scrollView.contentSize = CGSize(width: view.bounds.width * 2, height: view.bounds.height * 2)
+        scrollView.contentSize = CGSize(width: view.bounds.width * 8, height: view.bounds.height * 8)
         scrollView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(scrollView)
         
@@ -61,7 +61,7 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         canvasView.backgroundColor = .clear
         canvasView.isOpaque = false
         scrollView.delegate = self
-        scrollView.addSubview(canvasView)
+        scrollView.addSubview(canvasView)//where uiimage is loaded
         scrollView.isScrollEnabled = false
         
         let pinchGestureRecognizer = UIPinchGestureRecognizer(target: self, action: #selector(handlePinchGesture(_:)))
@@ -307,7 +307,10 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
                 print("Canvas view size: \(canvasViewSize)")
             }
             
-            if let pdfData = createPDFWithImageAndVector(image: strokeHistoryView.image!, pageIndex: 0){
+            UIImageWriteToSavedPhotosAlbum(imageView.image!, nil, nil, nil)
+
+            
+            if let pdfData = createPDFWithImageAndVector(image: imageView.image!, pageIndex: 0){
                 pdfEmail(data: pdfData)
             }
             
@@ -368,7 +371,7 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     }
     
     func takeScreenshot(of imageView: UIImageView, with canvasView: UIView) -> UIImage? {
-        let scale: CGFloat = 2.0 // 4x resolution for higher quality
+        let scale: CGFloat = 1.0 // 4x resolution for higher quality
         let imageViewSize = imageView.bounds.size
         
 
@@ -522,71 +525,109 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     
 
     func createPDFWithImageAndVector(image: UIImage, pageIndex: Int) -> Data? {
-        guard let pdfDocument = DocumentManager.shared.pdfDocument else {
-            print("Failed to load the existing PDF.")
+        // Use image pixel size (image.size is in points, so multiply by scale to get actual pixels)
+        let pixelSize = CGSize(width: image.size.width * image.scale,
+                               height: image.size.height * image.scale)
+        let pdfPageRect = CGRect(origin: .zero, size: pixelSize)
+        
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let outputURL = documentsURL.appendingPathComponent("output.pdf")
+        
+        UIGraphicsBeginPDFContextToFile(outputURL.path, pdfPageRect, nil)
+        UIGraphicsBeginPDFPageWithInfo(pdfPageRect, nil)
+        
+        // Draw image scaled to fit exactly the page
+        image.draw(in: pdfPageRect)
+        
+        UIGraphicsEndPDFContext()
+        
+        do {
+            let pdfData = try Data(contentsOf: outputURL)
+            return pdfData
+        } catch {
+            print("Failed to read generated PDF: \(error)")
             return nil
         }
-        
-        print("canvasView", canvasView.frame.size)
-        print("scrollView", scrollView.contentSize)
-        print("strokeHistory", strokeHistoryView.frame.size)
-        
-        
-        // Get the page where you want to add the drawing
-        guard let pdfPage = pdfDocument.page(at: pageIndex) else {
-            print("Page at index \(pageIndex) not found.")
-            return nil
-        }
-
-        // Get the page bounds to match the drawings to the correct area
-        let pageBounds = pdfPage.bounds(for: .mediaBox)
-        
-        print("pageSize", pageBounds.size)
-
-        // Create a new PDF page context for rendering
-        let pdfPageRenderer = UIGraphicsPDFRenderer(bounds: pageBounds)
-        let pdfData = pdfPageRenderer.pdfData { context in
-            context.beginPage()
-
-            let ctx = context.cgContext
-
-            // Apply vertical flip transformation to match UIKit's coordinate system
-            ctx.saveGState()
-            ctx.translateBy(x: 0, y: pageBounds.height)
-            ctx.scaleBy(x: 1.0, y: -1.0)
-
-            // Draw the existing PDF page content first
-            pdfPage.draw(with: .mediaBox, to: ctx)
-
-            // Restore the flipped context
-            ctx.restoreGState()
-
-            // Calculate scale factor to fit the image into the PDF page
-            let scaleX = pageBounds.width / image.size.width
-            let scaleY = pageBounds.height / image.size.height
-            let scale = min(scaleX, scaleY) // Use min to fit image within bounds
-
-            // Calculate the new size and position for the image
-            let scaledWidth = image.size.width * scale
-            let scaledHeight = image.size.height * scale
-            let imageX = (pageBounds.width - scaledWidth) / 2 // Center horizontally
-            let imageY = 0.0
-
-            // Draw the image
-            ctx.saveGState() // Save current state for flipping image
-            ctx.translateBy(x: 0, y: pageBounds.height) // Apply the vertical flip
-            ctx.scaleBy(x: 1.0, y: -1.0)
-            if let cgImage = image.cgImage {
-                let imageRect = CGRect(x: imageX, y: imageY, width: scaledWidth, height: scaledHeight)
-                ctx.draw(cgImage, in: imageRect)
-            } else {
-                print("Failed to convert UIImage to CGImage.")
-            }
-            ctx.restoreGState() // Restore after drawing the image
-        }
-
-        return pdfData
     }
+
+    
+//    func createPDFWithImageAndVector(image: UIImage, pageIndex: Int) -> Data? {
+//        let pdfDocument = PDFDocument()
+//        let pdfPage = PDFPage(image: image)
+//        pdfDocument.insert(pdfPage!, at: 0)
+//
+//        // Save to file
+//        if let documentData = pdfDocument.dataRepresentation() {
+//            let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+//            let outputURL = documentsURL.appendingPathComponent("output.pdf")
+//            return documentData
+//        }
+        
+//        guard let pdfDocument = DocumentManager.shared.pdfDocument else {
+//            print("Failed to load the existing PDF.")
+//            return nil
+//        }
+//        
+//        print("canvasView", canvasView.frame.size)
+//        print("scrollView", scrollView.contentSize)
+//        print("strokeHistory", strokeHistoryView.frame.size)
+//        
+//        
+//        // Get the page where you want to add the drawing
+//        guard let pdfPage = pdfDocument.page(at: pageIndex) else {
+//            print("Page at index \(pageIndex) not found.")
+//            return nil
+//        }
+//
+//        // Get the page bounds to match the drawings to the correct area
+//        let pageBounds = pdfPage.bounds(for: .mediaBox)
+//        
+//        print("pageSize", pageBounds.size)
+//
+//        // Create a new PDF page context for rendering
+//        let pdfPageRenderer = UIGraphicsPDFRenderer(bounds: pageBounds)
+//        let pdfData = pdfPageRenderer.pdfData { context in
+//            context.beginPage()
+//
+//            let ctx = context.cgContext
+//
+//            // Apply vertical flip transformation to match UIKit's coordinate system
+//            ctx.saveGState()
+//            ctx.translateBy(x: 0, y: pageBounds.height)
+//            ctx.scaleBy(x: 1.0, y: -1.0)
+//
+//            // Draw the existing PDF page content first
+//            pdfPage.draw(with: .mediaBox, to: ctx)
+//
+//            // Restore the flipped context
+//            ctx.restoreGState()
+//
+//            // Calculate scale factor to fit the image into the PDF page
+//            let scaleX = pageBounds.width / image.size.width
+//            let scaleY = pageBounds.height / image.size.height
+//            let scale = min(scaleX, scaleY) // Use min to fit image within bounds
+//
+//            // Calculate the new size and position for the image
+//            let scaledWidth = image.size.width * scale
+//            let scaledHeight = image.size.height * scale
+//            let imageX = (pageBounds.width - scaledWidth) / 2 // Center horizontally
+//            let imageY = 0.0
+//
+//            // Draw the image
+//            ctx.saveGState() // Save current state for flipping image
+//            ctx.translateBy(x: 0, y: pageBounds.height) // Apply the vertical flip
+//            ctx.scaleBy(x: 1.0, y: -1.0)
+//            if let cgImage = image.cgImage {
+//                let imageRect = CGRect(x: imageX, y: imageY, width: scaledWidth, height: scaledHeight)
+//                ctx.draw(cgImage, in: imageRect)
+//            } else {
+//                print("Failed to convert UIImage to CGImage.")
+//            }
+//            ctx.restoreGState() // Restore after drawing the image
+//        }
+
+//        return nil
+//    }
 
 
 //    // Usage

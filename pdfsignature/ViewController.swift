@@ -15,6 +15,7 @@ class ViewController: UIViewController {
         super.viewDidLoad()
         setupActivityIndicator()
         activityIndicator.startAnimating()
+        
     }
     
     override func viewDidAppear(_ animated: Bool) {

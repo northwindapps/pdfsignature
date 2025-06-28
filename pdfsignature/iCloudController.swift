@@ -9,9 +9,14 @@
 import UIKit
 import Foundation
 import PDFKit
+import Alamofire
 //import GoogleAPIClientForREST
 //import GoogleSignIn
 
+struct APIResponse: Codable {
+    let body: String
+    let headers: [String: String]?
+}
 
 class iCloudController: UIViewController,UIDocumentMenuDelegate,UIDocumentPickerDelegate,UINavigationControllerDelegate,FileManagerDelegate{
     
@@ -28,7 +33,7 @@ class iCloudController: UIViewController,UIDocumentMenuDelegate,UIDocumentPicker
         // Add it to the view hierarchy
         view.addSubview(activityIndicator)
     }
-
+    
     var excelName = ""
     
     private let activityIndicator = UIActivityIndicatorView(style: .medium)
@@ -88,29 +93,61 @@ class iCloudController: UIViewController,UIDocumentMenuDelegate,UIDocumentPicker
         //https://developer.apple.com/reference/foundation/nsfilemanager
         //
         
-        if url.absoluteString.contains(".pdf"){
-            DocumentManager.shared.documentURL = url
+        if url.absoluteString.hasSuffix(".pdf"){
+            if let savedURL = moveToDocuments(originalURL: url) {
+                DocumentManager.shared.documentURL = savedURL
+            }
         }
         
         if let pdfURL = DocumentManager.shared.documentURL {
-            if let pngImages = convertPDFToPNG(pdfURL: pdfURL) {
-                if let firstImage = pngImages.first {
-                    DocumentManager.shared.document = firstImage
+            // Show loading indicator
+            let loadingAlert = UIAlertController(title: "Processing", message: "Converting PDF...", preferredStyle: .alert)
+            present(loadingAlert, animated: true)
+            
+            Task {
+                do {
+                    print("Uploading PDF...")
+                    let (imageData, contentType) = try await uploadPDFAndGetImage(pdfURL: pdfURL)
+                    print("Received image: \(imageData.count) bytes, type: \(contentType)")
+                    
+                    // Create UIImage to verify it's valid
+                    if let image = UIImage(data: imageData) {
+                        print("Valid image created: \(image.size.width) x \(image.size.height)")
+                        DocumentManager.shared.document = image
+                    }
+                    
+                    // Also set the PDF document
+                    DocumentManager.shared.pdfDocument = PDFDocument(url: pdfURL)
+                    
+                    // Dismiss loading and present view controller
+                    await MainActor.run {
+                        loadingAlert.dismiss(animated: true) {
+                            let targetViewController = self.storyboard!.instantiateViewController(withIdentifier: "initialview") as! ViewController
+                            targetViewController.modalPresentationStyle = .fullScreen
+                            self.present(targetViewController, animated: true)
+                        }
+                    }
+                    
+                } catch {
+                    print("Error: \(error)")
+                    
+                    // Dismiss loading and show error
+                    await MainActor.run {
+                        loadingAlert.dismiss(animated: true) {
+                            let errorAlert = UIAlertController(title: "Error", message: error.localizedDescription, preferredStyle: .alert)
+                            errorAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                            self.present(errorAlert, animated: true)
+                        }
+                    }
                 }
             }
-            
-            DocumentManager.shared.pdfDocument = PDFDocument(url: pdfURL)
         }
-        
-        let targetViewController = self.storyboard!.instantiateViewController( withIdentifier: "initialview" ) as! ViewController//Landscape
-        targetViewController.modalPresentationStyle = .fullScreen
-        DispatchQueue.main.async {
-            self.present(targetViewController, animated: true, completion: nil)
-        }
-        
+
         print("end iCloudController")
-        
     }
+    
+  
+
     
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
         //dismiss(animated: true, completion: nil)
@@ -120,35 +157,115 @@ class iCloudController: UIViewController,UIDocumentMenuDelegate,UIDocumentPicker
             self.present(targetViewController, animated: true, completion: nil)
         }
     }
+
+    // Upload function
+    func uploadPDFAndGetImage(pdfURL: URL) async throws -> (Data, String) {
+        let apiURL = URL(string: "https://rzv9j9vrvd.execute-api.ap-northeast-1.amazonaws.com/dev/process-image")!
+        
+        var request = URLRequest(url: apiURL)
+        request.httpMethod = "POST"
+        
+        let boundary = UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        
+        var body = Data()
+        let pdfData = try Data(contentsOf: pdfURL)
+        let filename = pdfURL.lastPathComponent
+        
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"pdf\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: application/pdf\r\n\r\n".data(using: .utf8)!)
+        body.append(pdfData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        
+        let (data, response) = try await URLSession.shared.upload(for: request, from: body)
+        
+        if let httpResponse = response as? HTTPURLResponse {
+            print("Status: \(httpResponse.statusCode)")
+        }
+        
+        let apiResponse = try JSONDecoder().decode(APIResponse.self, from: data)
+        
+        guard let imageData = Data(base64Encoded: apiResponse.body) else {
+            throw NSError(domain: "DecodeError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to decode base64 image"])
+        }
+        
+        let contentType = apiResponse.headers?["Content-Type"] ?? "image/png"
+        
+        return (imageData, contentType)
+    }
+
+    
+    func moveToDocuments(originalURL: URL) -> URL? {
+        let fileManager = FileManager.default
+        let documentsURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let destinationURL = documentsURL.appendingPathComponent(originalURL.lastPathComponent)
+        
+        do {
+            // Remove if it already exists
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.removeItem(at: destinationURL)
+            }
+            try fileManager.copyItem(at: originalURL, to: destinationURL)
+            return destinationURL
+        } catch {
+            print("Failed to move file: \(error)")
+            return nil
+        }
+    }
+
+
     
     func convertPDFToPNG(pdfURL: URL) -> [UIImage]? {
         guard let pdfDocument = PDFDocument(url: pdfURL) else { return nil }
         
         var pngImages: [UIImage] = []
         
-        // Loop through each page in the PDF
-        for pageIndex in 0..<pdfDocument.pageCount {
-            guard let pdfPage = pdfDocument.page(at: pageIndex) else { continue }
-            
-            // Get the PDF page's size and create a UIImage
-            let pageRect = pdfPage.bounds(for: .mediaBox)
+        if let page = pdfDocument.page(at: 0) {
+            let pageRect = page.bounds(for: .cropBox) // instead of .cropBox
             let renderer = UIGraphicsImageRenderer(size: pageRect.size)
-            
-            let image = renderer.image { ctx in
-                // Draw the page into the context
+            let img = renderer.image { ctx in
                 UIColor.white.set()
                 ctx.fill(pageRect)
-                ctx.cgContext.translateBy(x: 0, y: pageRect.size.height)
-                ctx.cgContext.scaleBy(x: 1, y: -1)
-                
-                pdfPage.draw(with: .mediaBox, to: ctx.cgContext)
+                page.draw(with: .mediaBox, to: ctx.cgContext)
             }
-            
-            pngImages.append(image)
+            pngImages.append(img)
         }
+        
+//        for pageIndex in 0..<pdfDocument.pageCount {
+//            guard let pdfPage = pdfDocument.page(at: pageIndex) else { continue }
+//            
+//            let scale: CGFloat = 3.0  // Increase for higher resolution
+//            let pageRect = pdfPage.bounds(for: .mediaBox)
+//            let scaledSize = CGSize(width: pageRect.width * scale, height: pageRect.height * scale)
+//
+//            let renderer = UIGraphicsImageRenderer(size: scaledSize)
+//            let image = renderer.image { ctx in
+//                let context = ctx.cgContext
+//
+//                // Optional: white background
+//                UIColor.white.set()
+//                ctx.fill(CGRect(origin: .zero, size: scaledSize))
+//                
+//                // Flip and scale
+//                context.saveGState()
+//                context.translateBy(x: 0, y: scaledSize.height)
+//                context.scaleBy(x: scale, y: -scale)
+//
+//                // Now draw the PDF content
+//                pdfPage.draw(with: .mediaBox, to: context)
+//                context.restoreGState()
+//            }
+//            
+//            UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+//
+//            
+//            pngImages.append(image)
+//        }
         
         return pngImages
     }
+
     
     
     
