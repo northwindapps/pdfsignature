@@ -44,6 +44,10 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             // Initialize strokeHistoryView with the transparent image
             strokeHistoryView = UIImageView(image: transparentImage)
             print("sizes", imageView.image?.size, strokeHistoryView.image?.size)
+            //
+            strokeHistoryView.frame = CGRect(x: 0, y: 0, width: self.view.frame.width*1.5, height: self.view.frame.height*1.5)
+            imageView.frame = CGRect(x: 0, y: 200, width: self.view.frame.width*1.5, height: self.view.frame.height*1.5)
+            
             scrollView.addSubview(strokeHistoryView)
             scrollView.addSubview(imageView)
         }
@@ -261,8 +265,8 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     
     @objc func scaleDown() {
         //canvasView.drawing = PKDrawing()
-        //scrollView.setZoomScale(scrollView.maximumZoomScale, animated: true)
-        canvasView.shrinkStrokes(by: 1.3)
+        canvasView.shrinkStrokes(by: 0.7)
+    
     }
     
     
@@ -697,11 +701,54 @@ class CustomCanvasView: PKCanvasView {
     func shrinkStrokes(by factor: CGFloat) {
         guard factor > 0 else { return }
 
+        // Get the starting point of the first stroke as the anchor for all strokes
+        let firstStrokeStartingPoint: CGPoint
+        if let firstStroke = self.drawing.strokes.first,
+           let startingPoint = firstStroke.path.first?.location {
+            firstStrokeStartingPoint = startingPoint
+        } else {
+            // If no strokes or no starting point, do nothing
+            return
+        }
+
         var newStrokes = [PKStroke]()
 
         for stroke in self.drawing.strokes {
+            // Get the original length (assuming length() is a custom method or extension)
             let originalLength = stroke.path.length()
-            let newPath = stroke.path.resampled(to: originalLength / factor)
+            guard originalLength > 0 else {
+                newStrokes.append(stroke)
+                continue
+            }
+
+            // Calculate the target length based on the factor
+            let targetLength = originalLength * factor // factor < 1 to shrink, > 1 to enlarge
+            let scale = targetLength / originalLength // Should be equal to factor
+
+            // Scale points relative to the first stroke's starting point
+            var newPoints = [PKStrokePoint]()
+            for i in 0..<stroke.path.count {
+                let point = stroke.path[i]
+                // Adjust the location relative to the first stroke's starting point
+                let relativeX = point.location.x - firstStrokeStartingPoint.x
+                let relativeY = point.location.y - firstStrokeStartingPoint.y
+                // Scale the relative position
+                let scaledX = relativeX * scale
+                let scaledY = relativeY * scale
+                // Translate back to the first stroke's starting point
+                let newLocation = CGPoint(x: firstStrokeStartingPoint.x + scaledX, y: firstStrokeStartingPoint.y + scaledY)
+                let newPoint = PKStrokePoint(location: newLocation,
+                                             timeOffset: point.timeOffset,
+                                             size: point.size,
+                                             opacity: point.opacity,
+                                             force: point.force,
+                                             azimuth: point.azimuth,
+                                             altitude: point.altitude)
+                newPoints.append(newPoint)
+            }
+
+            // Create a new path with the transformed points
+            let newPath = PKStrokePath(controlPoints: newPoints, creationDate: stroke.path.creationDate)
             let newStroke = PKStroke(ink: stroke.ink, path: newPath, transform: stroke.transform, mask: stroke.mask)
             newStrokes.append(newStroke)
         }
