@@ -4,7 +4,7 @@ import Vision
 import PencilKit
 import MessageUI
 
-class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObserver , UIGestureRecognizerDelegate, UITextViewDelegate,MFMailComposeViewControllerDelegate{
+class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObserver , UIGestureRecognizerDelegate, UITextViewDelegate,MFMailComposeViewControllerDelegate,UIScrollViewDelegate{
 
     var canvasView: CustomCanvasView!
     var toolPicker: PKToolPicker!
@@ -17,6 +17,7 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     var inputBtn:UIButton!
     var inputMode = false
     var activityIndicator = UIActivityIndicatorView(style: .medium)
+    var scaleValue = 1.0
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -45,11 +46,17 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             strokeHistoryView = UIImageView(image: transparentImage)
             print("sizes", imageView.image?.size, strokeHistoryView.image?.size)
             //
-            strokeHistoryView.frame = CGRect(x: 0, y: 0, width: self.view.frame.width*1.5, height: self.view.frame.height*1.5)
-            imageView.frame = CGRect(x: 0, y: 200, width: self.view.frame.width*1.5, height: self.view.frame.height*1.5)
+            strokeHistoryView.frame = CGRect(x: 0, y: 0, width: self.view.frame.width*scaleValue, height: self.view.frame.height*scaleValue)
+            imageView.frame = CGRect(x: 0, y: 200, width: self.view.frame.width*scaleValue, height: self.view.frame.height*scaleValue)
             
             scrollView.addSubview(strokeHistoryView)
             scrollView.addSubview(imageView)
+            
+            // Set up scrollView for zooming
+//            scrollView.delegate = self
+//            scrollView.minimumZoomScale = 0.5 // Minimum scale (zoom out)
+//            scrollView.maximumZoomScale = 3.0 // Maximum scale (zoom in)
+
         }
 
         if DocumentManager.shared.documentURL == nil {
@@ -134,12 +141,62 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             inputBtn.trailingAnchor.constraint(equalTo: importButton.leadingAnchor, constant: -20),
             inputBtn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
         ])
+        
+
+        // Add a slider to the left of inputBtn
+        let slider = UISlider()
+        slider.minimumValue = 0.5 // Minimum scale (zoom out)
+        slider.maximumValue = 4.0 // Maximum scale (zoom in)
+        slider.value = Float(scaleValue) // Initial value matches scaleValue (1.0)
+        slider.addTarget(self, action: #selector(sliderValueChanged(_:)), for: .valueChanged)
+        view.addSubview(slider)
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            slider.trailingAnchor.constraint(equalTo: inputBtn.leadingAnchor, constant: -10),
+            slider.centerYAnchor.constraint(equalTo: inputBtn.centerYAnchor),
+            slider.widthAnchor.constraint(equalToConstant: 100)
+        ])
 
         activityIndicator.stopAnimating()
         activityIndicator.isHidden = true
         
         NotificationCenter.default.addObserver(self, selector: #selector(handleNotification), name: Notification.Name("notification"), object: nil)
         
+    }
+    
+    @objc func sliderValueChanged(_ slider: UISlider) {
+        // Update scaleValue based on slider value
+        scaleValue = CGFloat(slider.value)
+        print("Updated scaleValue to: \(scaleValue)")
+        
+        // Update frames of strokeHistoryView, imageView, and canvasView based on new scaleValue
+        let baseWidth = self.view.frame.width * scaleValue
+        let baseHeight = self.view.frame.height * scaleValue
+        
+        // Update strokeHistoryView frame
+        strokeHistoryView.frame = CGRect(x: 0, y: 0, width: baseWidth, height: baseHeight)
+        
+        // Update imageView frame (maintains y offset of 200)
+        imageView.frame = CGRect(x: 0, y: 200, width: baseWidth, height: baseHeight)
+        
+        // Update canvasView frame to match imageView (as per your viewDidLoad)
+        canvasView.frame = CGRect(x: 0, y: 0, width: baseWidth, height: baseHeight)
+        
+        // Update scrollView contentSize to accommodate the new scaled dimensions
+        scrollView.contentSize = CGSize(width: baseWidth, height: baseHeight + 200)
+    }
+    
+    func getCurrentScale() -> CGFloat {
+        return scrollView.zoomScale
+    }
+    
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            // Get the current scale
+            let currentScale = scrollView.zoomScale
+            print("Current zoom scale: \(currentScale)")
+            // You can use currentScale for UI updates, calculations, etc.
+            // Example: Update a label with the current scale
+            // scaleLabel.text = String(format: "Scale: %.2f", currentScale)
     }
     
     private func setupActivityIndicator() {
@@ -295,12 +352,6 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         let penTool = PKInkingTool(.pen, color: .black, width: 1)
         canvasView.tool = penTool
         if takeScreenshot(of: imageView, with: canvasView) != nil {
-            
-//            if let pdfData = saveStrokeToPDF() {
-//                pdfEmail(data: pdfData)
-//            }
-
-            
             if let strokeView = strokeHistoryView {
                 let strokeViewSize = strokeView.frame.size
                 print("Stroke view size: \(strokeViewSize)")
@@ -311,7 +362,7 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
                 print("Canvas view size: \(canvasViewSize)")
             }
             
-            UIImageWriteToSavedPhotosAlbum(imageView.image!, nil, nil, nil)
+            //UIImageWriteToSavedPhotosAlbum(imageView.image!, nil, nil, nil)
 
             
             if let pdfData = createPDFWithImageAndVector(image: imageView.image!, pageIndex: 0){
@@ -375,6 +426,7 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     }
     
     func takeScreenshot(of imageView: UIImageView, with canvasView: UIView) -> UIImage? {
+        
         let scale: CGFloat = 1.0 // 4x resolution for higher quality
         let imageViewSize = imageView.bounds.size
         
@@ -527,24 +579,41 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         return pngImages
     }
     
-
     func createPDFWithImageAndVector(image: UIImage, pageIndex: Int) -> Data? {
-        // Use image pixel size (image.size is in points, so multiply by scale to get actual pixels)
-        let pixelSize = CGSize(width: image.size.width * image.scale,
-                               height: image.size.height * image.scale)
-        let pdfPageRect = CGRect(origin: .zero, size: pixelSize)
+        // Get the original image size in points and scale to pixels
+        let originalPixelSize = CGSize(width: image.size.width * image.scale,
+                                       height: image.size.height * image.scale)
         
+        // Reduce the resolution by scaling down the size (e.g., divide by a factor to reduce size)
+        let scaleFactor: CGFloat = 0.6 // Adjust this value to balance quality and file size (0.5 = half resolution)
+        let reducedPixelSize = CGSize(width: originalPixelSize.width * scaleFactor,
+                                      height: originalPixelSize.height * scaleFactor)
+        let pdfPageRect = CGRect(origin: .zero, size: reducedPixelSize)
+        
+        // Set up the output PDF file path
         let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let outputURL = documentsURL.appendingPathComponent("output.pdf")
         
+        // Start PDF context with the reduced page size
         UIGraphicsBeginPDFContextToFile(outputURL.path, pdfPageRect, nil)
         UIGraphicsBeginPDFPageWithInfo(pdfPageRect, nil)
         
-        // Draw image scaled to fit exactly the page
+        // Option 1: Draw the image scaled down directly
         image.draw(in: pdfPageRect)
         
+        // Option 2 (Alternative): Compress the image before drawing to further reduce size
+//        if let compressedImageData = image.jpegData(compressionQuality: 1.0), // Adjust compression (0.0 to 1.0)
+//           let compressedImage = UIImage(data: compressedImageData) {
+//            compressedImage.draw(in: pdfPageRect)
+//        } else {
+//            image.draw(in: pdfPageRect) // Fallback to original if compression fails
+//        }
+        
+        
+        // End PDF context
         UIGraphicsEndPDFContext()
         
+        // Read the generated PDF data
         do {
             let pdfData = try Data(contentsOf: outputURL)
             return pdfData
@@ -553,6 +622,33 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             return nil
         }
     }
+    
+// too large size
+//    func createPDFWithImageAndVector(image: UIImage, pageIndex: Int) -> Data? {
+//        // Use image pixel size (image.size is in points, so multiply by scale to get actual pixels)
+//        let pixelSize = CGSize(width: image.size.width * image.scale,
+//                               height: image.size.height * image.scale)
+//        let pdfPageRect = CGRect(origin: .zero, size: pixelSize)
+//        
+//        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+//        let outputURL = documentsURL.appendingPathComponent("output.pdf")
+//        
+//        UIGraphicsBeginPDFContextToFile(outputURL.path, pdfPageRect, nil)
+//        UIGraphicsBeginPDFPageWithInfo(pdfPageRect, nil)
+//        
+//        // Draw image scaled to fit exactly the page
+//        image.draw(in: pdfPageRect)
+//        
+//        UIGraphicsEndPDFContext()
+//        
+//        do {
+//            let pdfData = try Data(contentsOf: outputURL)
+//            return pdfData
+//        } catch {
+//            print("Failed to read generated PDF: \(error)")
+//            return nil
+//        }
+//    }
 
     
 //    func createPDFWithImageAndVector(image: UIImage, pageIndex: Int) -> Data? {
