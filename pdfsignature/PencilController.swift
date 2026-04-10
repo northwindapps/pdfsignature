@@ -12,11 +12,26 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     var timer: Timer?
     var id = ""
     var imageView: UIImageView!
+    var overlayImageView: UIImageView!
     var strokeHistoryView: UIImageView!
     var saveButton: UIButton!
     var inputBtn:UIButton!
     var inputMode = false
     var activityIndicator = UIActivityIndicatorView(style: .medium)
+    
+    private var pdfPageImages: [UIImage] = []
+    private var pageDrawings: [PKDrawing] = []
+    private var pageStrokeOverlays: [UIImage?] = []
+    private var currentPageIndex: Int = 0
+    
+    private let bottomBarHeight: CGFloat = 64
+    private var bottomBar: UIView!
+    private var pageNumberScrollView: UIScrollView!
+    private var pageNumberStackView: UIStackView!
+    private var pageButtons: [UIButton] = []
+    private var prevPageButton: UIButton!
+    private var nextPageButton: UIButton!
+    private var pageStatusLabel: UILabel!
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -25,32 +40,51 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         let topMargin: CGFloat = 60
 
         // Create UIScrollView with margin
-        scrollView = UIScrollView(frame: CGRect(x: 0, y: topMargin, width: view.bounds.width, height: view.bounds.height - topMargin))
+        scrollView = UIScrollView(frame: CGRect(x: 0, y: topMargin, width: view.bounds.width, height: view.bounds.height - topMargin - bottomBarHeight))
         scrollView.contentSize = CGSize(width: view.bounds.width * 2, height: view.bounds.height * 2)
         scrollView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(scrollView)
         
-        // Create ImageView
-        if let firstImage = DocumentManager.shared.document {
-            imageView = UIImageView(image: firstImage)
-            imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            scrollView.addSubview(imageView)
-            imageView.contentMode = .scaleAspectFit
-            //initialize
-            strokeHistoryView =  UIImageView(image: firstImage)
-            strokeHistoryView.image = UIImage()
+        // Load PDF pages (multi-page) or fallback to single image.
+        if let pdfURL = DocumentManager.shared.documentURL, let images = convertPDFToPNG(pdfURL: pdfURL), !images.isEmpty {
+            pdfPageImages = images
+        } else if let singleImage = DocumentManager.shared.document {
+            pdfPageImages = [singleImage]
         }
-
-        if DocumentManager.shared.documentURL == nil {
+        
+        if pdfPageImages.isEmpty {
+            activityIndicator.stopAnimating()
+            activityIndicator.isHidden = true
             return
         }
         
-        if DocumentManager.shared.document == nil {
-            return
-        }
+        pageDrawings = Array(repeating: PKDrawing(), count: pdfPageImages.count)
+        pageStrokeOverlays = Array(repeating: nil, count: pdfPageImages.count)
+        currentPageIndex = 0
+        
+        // Create ImageView (base PDF page)
+        imageView = UIImageView(frame: scrollView.bounds)
+        imageView.image = pdfPageImages[currentPageIndex]
+        imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        scrollView.addSubview(imageView)
+        imageView.contentMode = .scaleAspectFit
+        
+        // Overlay view for committed strokes (saved marks)
+        overlayImageView = UIImageView(frame: scrollView.bounds)
+        overlayImageView.backgroundColor = .clear
+        overlayImageView.isOpaque = false
+        overlayImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        overlayImageView.contentMode = .scaleAspectFit
+        scrollView.addSubview(overlayImageView)
+        
+        // Scratch view used only to accumulate overlay screenshots
+        strokeHistoryView = UIImageView(frame: scrollView.bounds)
+        strokeHistoryView.backgroundColor = .clear
+        strokeHistoryView.isOpaque = false
+        strokeHistoryView.image = nil
 
         // Create PKCanvasView
-        canvasView = CustomCanvasView(frame: CGRect(x: 0, y: 0, width: imageView.frame.width, height: imageView.frame.height))
+        canvasView = CustomCanvasView(frame: scrollView.bounds)
         canvasView.backgroundColor = .clear
         canvasView.isOpaque = false
         scrollView.delegate = self
@@ -66,6 +100,9 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
 
       
 
+        setupPageSelectorBar()
+        updatePageUI(animated: false)
+        
         // Add reset strokes button
         let resetStrokeButton = UIButton(type: .system)
         resetStrokeButton.setTitle("Adjust", for: .normal)
@@ -253,33 +290,36 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         //scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
         let penTool = PKInkingTool(.pen, color: .black, width: 2)
         canvasView.tool = penTool
-        if let screenshot = takeScreenshot(of: imageView, with: canvasView) {
-            imageView.image = screenshot
-            canvasView.drawing = PKDrawing()
-            saveButton.isHidden = true
+        // Commit current strokes into the per-page overlay image (so they persist when switching pages).
+        strokeHistoryView.frame = overlayImageView.bounds
+        strokeHistoryView.contentMode = .scaleAspectFit
+        strokeHistoryView.image = pageStrokeOverlays[currentPageIndex] ?? nil
+        
+        if let overlayScreenshot = takeScreenshot(of: strokeHistoryView, with: canvasView) {
+            pageStrokeOverlays[currentPageIndex] = overlayScreenshot
+            overlayImageView.image = overlayScreenshot
         }
         
-        //save on SHV
-        if strokeHistoryView != nil, let screenshot = takeScreenshot(of: strokeHistoryView, with: canvasView) {
-            strokeHistoryView.image = screenshot
-            strokeHistoryView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            strokeHistoryView.contentMode = .scaleAspectFit
-        }
+        pageDrawings[currentPageIndex] = PKDrawing()
+        canvasView.drawing = PKDrawing()
+        saveButton.isHidden = true
     }
     
     @objc func exportPDF() {
         let penTool = PKInkingTool(.pen, color: .black, width: 2)
         canvasView.tool = penTool
-        if let screenshot = takeScreenshot(of: imageView, with: canvasView) {
-            
-            if let pdfData = saveStrokeToPDF() {
-                //pdfEmail(data: pdfData)
-                pdfEmail(data: pdfData)
-            }
-            
-            canvasView.drawing = PKDrawing()
-            saveButton.isHidden = true
+        
+        // If there are uncommitted strokes on the current page, commit them before exporting.
+        if !canvasView.drawing.strokes.isEmpty {
+            saveStroke()
         }
+        
+        if let pdfData = saveStrokeToPDF() {
+            pdfEmail(data: pdfData)
+        }
+        
+        canvasView.drawing = PKDrawing()
+        saveButton.isHidden = true
     }
     
     // Function to convert a UIImage to PDF
@@ -368,32 +408,42 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     }
 
     func saveStrokeToPDF() -> Data? {
-        guard let existingPDF = DocumentManager.shared.document,
-              let pdfDocument = PDFDocument(url: DocumentManager.shared.documentURL!) else {
-            print("No existing PDF document found.")
-            return nil
-        }
-
-        // Create a renderer to capture the canvas view
-        let renderer = UIGraphicsImageRenderer(size: strokeHistoryView.bounds.size)
-
-        // Get the first page of the PDF
-        if let pdfPage = pdfDocument.page(at: 0) {
-            let pdfPageBounds = pdfPage.bounds(for: .mediaBox)
-
-            // Resize the canvas image to match the PDF page size
-            if let resizedCanvasImage = resizeImage(image: strokeHistoryView.image!, targetSize: pdfPageBounds.size) {
-                // Create a new annotation
+        // If we have an original PDF, add overlay annotations to it.
+        if let pdfURL = DocumentManager.shared.documentURL, let pdfDocument = PDFDocument(url: pdfURL) {
+            // Add an overlay annotation per page (if any strokes were committed on that page).
+            let pageCount = min(pdfDocument.pageCount, pageStrokeOverlays.count)
+            for pageIndex in 0..<pageCount {
+                guard let overlay = pageStrokeOverlays[pageIndex] else { continue }
+                guard let pdfPage = pdfDocument.page(at: pageIndex) else { continue }
+                
+                let pdfPageBounds = pdfPage.bounds(for: .mediaBox)
+                guard let resizedOverlay = resizeImage(image: overlay, targetSize: pdfPageBounds.size) else { continue }
+                
                 let imageBounds = CGRect(x: 0, y: 0, width: pdfPageBounds.width, height: pdfPageBounds.height)
-                let annotation = PDFImageAnnotation(resizedCanvasImage, bounds: imageBounds, properties: nil)
-
-                // Add the annotation to the page
+                let annotation = PDFImageAnnotation(resizedOverlay, bounds: imageBounds, properties: nil)
                 pdfPage.addAnnotation(annotation)
             }
+            
+            return pdfDocument.dataRepresentation()
         }
-
-        // Return the modified PDF as Data
-        return pdfDocument.dataRepresentation()
+        
+        // Otherwise, generate a new PDF from the rendered pages (base + overlays).
+        guard !pdfPageImages.isEmpty else { return nil }
+        
+        let output = NSMutableData()
+        let firstSize = pdfPageImages[0].size
+        UIGraphicsBeginPDFContextToData(output, CGRect(origin: .zero, size: firstSize), nil)
+        for i in 0..<pdfPageImages.count {
+            let base = pdfPageImages[i]
+            let size = base.size
+            UIGraphicsBeginPDFPageWithInfo(CGRect(origin: .zero, size: size), nil)
+            base.draw(in: CGRect(origin: .zero, size: size))
+            if let overlay = pageStrokeOverlays.indices.contains(i) ? pageStrokeOverlays[i] : nil {
+                overlay.draw(in: CGRect(origin: .zero, size: size))
+            }
+        }
+        UIGraphicsEndPDFContext()
+        return output as Data
     }
     
 
@@ -455,9 +505,20 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     override func viewDidLayoutSubviews() {
            super.viewDidLayoutSubviews()
 
-        if (canvasView != nil){
-            // Update the canvasView frame to match the scrollView contentSize
-            canvasView.frame = CGRect(x: 0, y: 0, width: scrollView.contentSize.width, height: scrollView.contentSize.height)
+        // Keep the scroll area above the bottom bar.
+        let topMargin: CGFloat = 60
+        scrollView.frame = CGRect(
+            x: 0,
+            y: topMargin,
+            width: view.bounds.width,
+            height: view.bounds.height - topMargin - bottomBarHeight - view.safeAreaInsets.bottom
+        )
+        scrollView.contentSize = scrollView.bounds.size
+        
+        if canvasView != nil {
+            imageView.frame = scrollView.bounds
+            overlayImageView.frame = scrollView.bounds
+            canvasView.frame = scrollView.bounds
         }
        }
     
@@ -512,6 +573,156 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         }
         
         return pngImages
+    }
+    
+    // MARK: - Page selector bar (multi-page)
+    private func setupPageSelectorBar() {
+        bottomBar = UIView()
+        bottomBar.translatesAutoresizingMaskIntoConstraints = false
+        bottomBar.backgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.95)
+        view.addSubview(bottomBar)
+        
+        NSLayoutConstraint.activate([
+            bottomBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bottomBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomBar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            bottomBar.heightAnchor.constraint(equalToConstant: bottomBarHeight)
+        ])
+        
+        prevPageButton = UIButton(type: .system)
+        prevPageButton.setTitle("◀︎", for: .normal)
+        prevPageButton.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
+        prevPageButton.addTarget(self, action: #selector(goToPreviousPage), for: .touchUpInside)
+        prevPageButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        nextPageButton = UIButton(type: .system)
+        nextPageButton.setTitle("▶︎", for: .normal)
+        nextPageButton.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
+        nextPageButton.addTarget(self, action: #selector(goToNextPage), for: .touchUpInside)
+        nextPageButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        pageStatusLabel = UILabel()
+        pageStatusLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        pageStatusLabel.textColor = .secondaryLabel
+        pageStatusLabel.textAlignment = .center
+        pageStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        pageNumberScrollView = UIScrollView()
+        pageNumberScrollView.showsHorizontalScrollIndicator = false
+        pageNumberScrollView.translatesAutoresizingMaskIntoConstraints = false
+        
+        pageNumberStackView = UIStackView()
+        pageNumberStackView.axis = .horizontal
+        pageNumberStackView.spacing = 8
+        pageNumberStackView.alignment = .center
+        pageNumberStackView.translatesAutoresizingMaskIntoConstraints = false
+        pageNumberScrollView.addSubview(pageNumberStackView)
+        
+        bottomBar.addSubview(prevPageButton)
+        bottomBar.addSubview(nextPageButton)
+        bottomBar.addSubview(pageNumberScrollView)
+        bottomBar.addSubview(pageStatusLabel)
+        
+        NSLayoutConstraint.activate([
+            prevPageButton.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor, constant: 12),
+            prevPageButton.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
+            prevPageButton.widthAnchor.constraint(equalToConstant: 44),
+            prevPageButton.heightAnchor.constraint(equalToConstant: 44),
+            
+            nextPageButton.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor, constant: -12),
+            nextPageButton.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
+            nextPageButton.widthAnchor.constraint(equalToConstant: 44),
+            nextPageButton.heightAnchor.constraint(equalToConstant: 44),
+            
+            pageStatusLabel.leadingAnchor.constraint(equalTo: prevPageButton.trailingAnchor, constant: 8),
+            pageStatusLabel.trailingAnchor.constraint(equalTo: nextPageButton.leadingAnchor, constant: -8),
+            pageStatusLabel.topAnchor.constraint(equalTo: bottomBar.topAnchor, constant: 6),
+            pageStatusLabel.heightAnchor.constraint(equalToConstant: 16),
+            
+            pageNumberScrollView.leadingAnchor.constraint(equalTo: prevPageButton.trailingAnchor, constant: 8),
+            pageNumberScrollView.trailingAnchor.constraint(equalTo: nextPageButton.leadingAnchor, constant: -8),
+            pageNumberScrollView.topAnchor.constraint(equalTo: pageStatusLabel.bottomAnchor, constant: 6),
+            pageNumberScrollView.bottomAnchor.constraint(equalTo: bottomBar.bottomAnchor, constant: -6),
+            
+            pageNumberStackView.leadingAnchor.constraint(equalTo: pageNumberScrollView.contentLayoutGuide.leadingAnchor),
+            pageNumberStackView.trailingAnchor.constraint(equalTo: pageNumberScrollView.contentLayoutGuide.trailingAnchor),
+            pageNumberStackView.topAnchor.constraint(equalTo: pageNumberScrollView.contentLayoutGuide.topAnchor),
+            pageNumberStackView.bottomAnchor.constraint(equalTo: pageNumberScrollView.contentLayoutGuide.bottomAnchor),
+            pageNumberStackView.heightAnchor.constraint(equalTo: pageNumberScrollView.frameLayoutGuide.heightAnchor)
+        ])
+        
+        rebuildPageButtons()
+    }
+    
+    private func rebuildPageButtons() {
+        pageButtons.forEach { $0.removeFromSuperview() }
+        pageButtons.removeAll()
+        
+        guard !pdfPageImages.isEmpty else { return }
+        for i in 0..<pdfPageImages.count {
+            let button = UIButton(type: .system)
+            button.setTitle("\(i + 1)", for: .normal)
+            button.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+            button.layer.cornerRadius = 10
+            button.layer.borderWidth = 1
+            button.contentEdgeInsets = UIEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+            button.tag = i
+            button.addTarget(self, action: #selector(selectPageFromButton(_:)), for: .touchUpInside)
+            pageNumberStackView.addArrangedSubview(button)
+            pageButtons.append(button)
+        }
+    }
+    
+    @objc private func selectPageFromButton(_ sender: UIButton) {
+        goToPage(sender.tag, animated: true)
+    }
+    
+    @objc private func goToPreviousPage() {
+        goToPage(max(0, currentPageIndex - 1), animated: true)
+    }
+    
+    @objc private func goToNextPage() {
+        goToPage(min(pdfPageImages.count - 1, currentPageIndex + 1), animated: true)
+    }
+    
+    private func goToPage(_ index: Int, animated: Bool) {
+        guard index >= 0, index < pdfPageImages.count else { return }
+        guard index != currentPageIndex else { return }
+        
+        // Persist any in-progress drawing for the current page.
+        pageDrawings[currentPageIndex] = canvasView.drawing
+        
+        currentPageIndex = index
+        updatePageUI(animated: animated)
+    }
+    
+    private func updatePageUI(animated: Bool) {
+        guard !pdfPageImages.isEmpty else { return }
+        
+        imageView.image = pdfPageImages[currentPageIndex]
+        overlayImageView.image = pageStrokeOverlays[currentPageIndex] ?? nil
+        canvasView.drawing = pageDrawings[currentPageIndex]
+        saveButton.isHidden = true
+        
+        let current = currentPageIndex + 1
+        pageStatusLabel.text = "Page \(current) / \(pdfPageImages.count)"
+        
+        prevPageButton.isEnabled = currentPageIndex > 0
+        nextPageButton.isEnabled = currentPageIndex < pdfPageImages.count - 1
+        
+        for (i, button) in pageButtons.enumerated() {
+            let isSelected = i == currentPageIndex
+            button.layer.borderColor = (isSelected ? UIColor.systemBlue : UIColor.tertiaryLabel).cgColor
+            button.setTitleColor(isSelected ? .white : .label, for: .normal)
+            button.backgroundColor = isSelected ? .systemBlue : .clear
+        }
+        
+        // Ensure the selected page button is visible.
+        if currentPageIndex < pageButtons.count {
+            let selectedButton = pageButtons[currentPageIndex]
+            let targetRect = selectedButton.convert(selectedButton.bounds, to: pageNumberScrollView)
+            pageNumberScrollView.scrollRectToVisible(targetRect.insetBy(dx: -20, dy: 0), animated: animated)
+        }
     }
     
 }
