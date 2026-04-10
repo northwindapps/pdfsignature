@@ -1075,14 +1075,16 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         overlayImageView.image = nil
         stickerContainerView?.subviews.forEach { $0.removeFromSuperview() }
     }
-    
-    /// Bottom → top: page, committed ink, live ink, stickers (matches intended interaction).
+
     private func restackScrollSubviewsForHitTesting() {
-        scrollView.bringSubviewToFront(imageView)
-        scrollView.bringSubviewToFront(overlayImageView)
-        scrollView.bringSubviewToFront(canvasView)
-        scrollView.bringSubviewToFront(stickerContainerView)
+        let views = [imageView, overlayImageView, canvasView, stickerContainerView].compactMap { $0 }
+        views.forEach { view in
+            if view.superview == scrollView {
+                scrollView.bringSubviewToFront(view)
+            }
+        }
     }
+
     
     private func updatePageUI(animated: Bool) {
         guard !pdfPageImages.isEmpty else { return }
