@@ -1174,8 +1174,11 @@ class PDFImageAnnotation: PDFAnnotation {
     var image: UIImage?
 
     convenience init(_ image: UIImage?, bounds: CGRect, properties: [AnyHashable: Any]?) {
-        self.init(bounds: bounds, forType: .ink, withProperties: properties)
+        // Use a stamp annotation since it's reliably preserved/displayed as an image.
+        self.init(bounds: bounds, forType: .stamp, withProperties: properties)
         self.image = image
+        self.shouldDisplay = true
+        self.shouldPrint = true
     }
 
     override func draw(with box: PDFDisplayBox, in context: CGContext) {
@@ -1183,7 +1186,12 @@ class PDFImageAnnotation: PDFAnnotation {
 
         // Drawing the image within the annotation's bounds.
         guard let cgImage = image?.cgImage else { return }
-        context.draw(cgImage, in: bounds)
+        context.saveGState()
+        // PDF coordinate space is typically bottom-left; draw the image upright.
+        context.translateBy(x: bounds.origin.x, y: bounds.origin.y + bounds.size.height)
+        context.scaleBy(x: 1, y: -1)
+        context.draw(cgImage, in: CGRect(origin: .zero, size: bounds.size))
+        context.restoreGState()
     }
 }
 
