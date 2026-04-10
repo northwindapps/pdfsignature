@@ -450,20 +450,22 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     
     
     @objc func saveStroke() {
-        //canvasView.drawing = PKDrawing()
-        //scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
         let penTool = PKInkingTool(.pen, color: .black, width: 2)
         canvasView.tool = penTool
-        // Commit current strokes into the per-page overlay image (so they persist when switching pages).
-        strokeHistoryView.frame = overlayImageView.bounds
-        strokeHistoryView.contentMode = .scaleAspectFit
-        strokeHistoryView.image = pageStrokeOverlays[currentPageIndex] ?? nil
         
-        if let overlay = takeScreenshotCorrect() {
-            pageStrokeOverlays[currentPageIndex] = overlay
-            overlayImageView.image = overlay
+        // Nothing new to commit and no prior overlay to refresh.
+        if canvasView.drawing.strokes.isEmpty {
+            saveButton.isHidden = true
+            return
         }
         
+        // Commit current strokes into the per-page overlay. Must composite on top of any
+        // existing overlay; takeScreenshotCorrect() alone would only draw base + new ink
+        // and would drop all previously saved strokes.
+        guard let overlay = takeScreenshotCorrect() else { return }
+        
+        pageStrokeOverlays[currentPageIndex] = overlay
+        overlayImageView.image = overlay
         pageDrawings[currentPageIndex] = PKDrawing()
         canvasView.drawing = PKDrawing()
         saveButton.isHidden = true
@@ -768,27 +770,38 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         }
     }
     
+    /// Builds a transparent bitmap of committed ink in page space (same size as the page raster).
+    /// Each Save merges prior `pageStrokeOverlays` + new `canvasView` ink so history is not lost.
     func takeScreenshotCorrect() -> UIImage? {
         guard let baseImage = imageView.image else { return nil }
         
         let imageFrame = aspectFitFrame(for: baseImage, in: imageView)
+        guard imageFrame.width > 0, imageFrame.height > 0 else { return nil }
         
-        let renderer = UIGraphicsImageRenderer(size: baseImage.size)
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        format.scale = baseImage.scale
+        let renderer = UIGraphicsImageRenderer(size: baseImage.size, format: format)
         
         return renderer.image { ctx in
-            // 1. Draw original image
-            baseImage.draw(in: CGRect(origin: .zero, size: baseImage.size))
+            let dest = CGRect(origin: .zero, size: baseImage.size)
+            ctx.cgContext.clear(dest)
             
-            // 2. Map canvas → image coordinates
+            // 1. Prior committed strokes (stroke-only layer; do not bake the page PDF in here).
+            if let previous = pageStrokeOverlays[currentPageIndex],
+               previous.size.width > 0, previous.size.height > 0,
+               abs(previous.size.width - baseImage.size.width) < 0.5,
+               abs(previous.size.height - baseImage.size.height) < 0.5 {
+                previous.draw(in: dest, blendMode: .normal, alpha: 1)
+            }
+            
+            // 2. New ink from canvas, aligned to the aspect-fit page rect.
             let scaleX = baseImage.size.width / imageFrame.width
             let scaleY = baseImage.size.height / imageFrame.height
             
             ctx.cgContext.translateBy(x: -imageFrame.origin.x * scaleX,
                                       y: -imageFrame.origin.y * scaleY)
-            
             ctx.cgContext.scaleBy(x: scaleX, y: scaleY)
-            
-            // 3. Render strokes correctly aligned
             canvasView.layer.render(in: ctx.cgContext)
         }
     }
