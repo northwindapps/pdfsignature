@@ -4,9 +4,10 @@ import Vision
 import PencilKit
 import MessageUI
 
-class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObserver , UIGestureRecognizerDelegate, UITextViewDelegate,MFMailComposeViewControllerDelegate{
+class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanvasViewDelegate,PKToolPickerObserver , UIGestureRecognizerDelegate, UITextViewDelegate,MFMailComposeViewControllerDelegate, UINavigationControllerDelegate{
 
     var canvasView = CustomCanvasView()
+    var stickerContainerView: UIView!
     var toolPicker: PKToolPicker!
     var scrollView: UIScrollView!
     var timer: Timer?
@@ -18,6 +19,7 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     var inputBtn = UIButton()
     var inputMode = false
     var activityIndicator = UIActivityIndicatorView(style: .medium)
+    
     
     private var pdfPageImages: [UIImage] = []
     private var pageDrawings: [PKDrawing] = []
@@ -103,6 +105,8 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         setupPageSelectorBar()
         updatePageUI(animated: false)
         
+        
+        
         // Add reset strokes button
         let resetStrokeButton = UIButton(type: .system)
         resetStrokeButton.setTitle("Adjust", for: .normal)
@@ -160,11 +164,32 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             inputBtn.trailingAnchor.constraint(equalTo: importButton.leadingAnchor, constant: -20),
             inputBtn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
         ])
+        
+        //images
+        let imageButton = UIButton(type: .system)
+        imageButton.setTitle("Images", for: .normal)
+        imageButton.addTarget(self, action: #selector(openImagePicker), for: .touchUpInside)
+
+        view.addSubview(imageButton)
+        imageButton.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            imageButton.trailingAnchor.constraint(equalTo: inputBtn.leadingAnchor, constant: -20),
+            imageButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
+        ])
 
         activityIndicator.stopAnimating()
         activityIndicator.isHidden = true
         
         NotificationCenter.default.addObserver(self, selector: #selector(handleNotification), name: Notification.Name("notification"), object: nil)
+        
+        //
+        stickerContainerView = UIView(frame: scrollView.bounds)
+        stickerContainerView.backgroundColor = .clear
+        stickerContainerView.isUserInteractionEnabled = true
+        stickerContainerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
+        scrollView.addSubview(stickerContainerView)
         
     }
     
@@ -175,6 +200,137 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         
         // Add it to the view hierarchy
         view.addSubview(activityIndicator)
+    }
+    
+    @objc func openImagePicker() {
+        let picker = UIImagePickerController()
+        picker.sourceType = .photoLibrary
+        picker.delegate = self
+        picker.modalPresentationStyle = .fullScreen
+        present(picker, animated: true)
+    }
+    
+    func imagePickerController(_ picker: UIImagePickerController,
+                               didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+        
+        picker.dismiss(animated: true)
+
+        guard let image = info[.originalImage] as? UIImage else { return }
+
+        addSticker(image: image)
+    }
+    
+    func addSticker(image: UIImage) {
+        let sticker = UIImageView(image: image)
+        
+        sticker.frame = CGRect(x: 100, y: 100, width: 150, height: 150)
+        sticker.isUserInteractionEnabled = true
+        sticker.contentMode = .scaleAspectFit
+        
+        // Gestures
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        let rotation = UIRotationGestureRecognizer(target: self, action: #selector(handleRotate(_:)))
+        
+        sticker.addGestureRecognizer(pan)
+        sticker.addGestureRecognizer(pinch)
+        sticker.addGestureRecognizer(rotation)
+        
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleStickerDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+
+        sticker.addGestureRecognizer(doubleTap)
+        
+        stickerContainerView.addSubview(sticker)
+    }
+    
+    @objc func handleStickerDoubleTap(_ gesture: UITapGestureRecognizer) {
+        guard gesture.view != nil else { return }
+        
+        let alert = UIAlertController(
+            title: "Switch to Draw Mode?",
+            message: "Do you want to switch to pen mode and start drawing?",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        
+        alert.addAction(UIAlertAction(title: "Yes", style: .default, handler: { [weak self] _ in
+            self?.switchToPenMode()
+        }))
+        
+        present(alert, animated: true)
+    }
+    
+    func switchToPenMode() {
+        // Enable drawing
+        canvasView.isUserInteractionEnabled = true
+        canvasView.becomeFirstResponder()
+        
+        // Disable sticker movement (optional but recommended)
+        stickerContainerView.isUserInteractionEnabled = false
+        
+        // Set pen tool
+        let penTool = PKInkingTool(.pen, color: .black, width: 3)
+        canvasView.tool = penTool
+        
+        showToast("Pen mode enabled ✏️")
+    }
+    
+    func showToast(_ message: String) {
+        let label = UILabel()
+        label.text = message
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.alpha = 0
+        label.layer.cornerRadius = 8
+        label.clipsToBounds = true
+        
+        view.addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            label.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -100),
+            label.widthAnchor.constraint(lessThanOrEqualToConstant: 250)
+        ])
+        
+        UIView.animate(withDuration: 0.3) {
+            label.alpha = 1
+        } completion: { _ in
+            UIView.animate(withDuration: 0.3, delay: 1.5) {
+                label.alpha = 0
+            } completion: { _ in
+                label.removeFromSuperview()
+            }
+        }
+    }
+    
+    @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard let view = gesture.view else { return }
+        let translation = gesture.translation(in: stickerContainerView)
+        
+        view.center = CGPoint(
+            x: view.center.x + translation.x,
+            y: view.center.y + translation.y
+        )
+        
+        gesture.setTranslation(.zero, in: stickerContainerView)
+    }
+    
+    @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        guard let view = gesture.view else { return }
+        
+        view.transform = view.transform.scaledBy(x: gesture.scale, y: gesture.scale)
+        gesture.scale = 1
+    }
+    
+    @objc func handleRotate(_ gesture: UIRotationGestureRecognizer) {
+        guard let view = gesture.view else { return }
+        
+        view.transform = view.transform.rotated(by: gesture.rotation)
+        gesture.rotation = 0
     }
     
     //sendEmail
@@ -345,11 +501,19 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         let fileManager = FileManager.default
         let documentsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
         let pdfPath = documentsPath?.appendingPathComponent("screenshot.pdf")
+        let imageToExport = renderPageForExport()
         
-        do {
+        let pdfRenderer = UIGraphicsPDFRenderer(bounds: CGRect(origin: .zero, size: imageToExport.size))
+        
+        let data = pdfRenderer.pdfData { ctx in
+            ctx.beginPage()
+            imageToExport.draw(at: .zero)
+        }
+        
+        do{
             try data.write(to: pdfPath!)
             print("PDF saved to: \(pdfPath!)")
-        } catch {
+        }catch{
             print("Failed to save PDF: \(error)")
         }
     }
@@ -364,6 +528,28 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         if !scrollView.isScrollEnabled{
             inputBtn.setTitle("Mode:w", for: .normal)
         }
+    }
+    
+    func renderPageForExport() -> UIImage {
+        let pageSize = pdfPageImages[currentPageIndex].size
+
+        UIGraphicsBeginImageContextWithOptions(pageSize, false, 0)
+        defer { UIGraphicsEndImageContext() }
+
+        // Draw base PDF page
+        pdfPageImages[currentPageIndex].draw(in: CGRect(origin: .zero, size: pageSize))
+        
+        // Draw pen strokes
+        let drawingImage = canvasView.drawing.image(from: canvasView.bounds, scale: 1.0)
+        drawingImage.draw(in: CGRect(origin: .zero, size: pageSize))
+
+        // Draw all sticker images
+        for sticker in stickerContainerView.subviews where sticker is UIImageView {
+            guard let imageView = sticker as? UIImageView else { continue }
+            imageView.image?.draw(in: imageView.frame)
+        }
+
+        return UIGraphicsGetImageFromCurrentImageContext() ?? pdfPageImages[currentPageIndex]
     }
     
     @objc func importPDF() {
@@ -437,8 +623,23 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
             let base = pdfPageImages[i]
             let size = base.size
             UIGraphicsBeginPDFPageWithInfo(CGRect(origin: .zero, size: size), nil)
-            base.draw(in: CGRect(origin: .zero, size: size))
-            if let overlay = pageStrokeOverlays.indices.contains(i) ? pageStrokeOverlays[i] : nil {
+            var composed = base
+
+            // 1. Add stickers
+            if i == currentPageIndex {
+                if let withStickers = renderStickers(on: composed, for: i) {
+                    composed = withStickers
+                }
+            }
+
+            // 2. Draw result
+//            composed.draw(in: CGRect(origin: .zero, size: size))
+            if let composed = renderStickers(on: pdfPageImages[i], for: i) {
+                composed.draw(in: CGRect(origin: .zero, size: pdfPageImages[i].size))
+            }
+
+            // 3. Add strokes on top
+            if let overlay = pageStrokeOverlays[i] {
                 overlay.draw(in: CGRect(origin: .zero, size: size))
             }
         }
@@ -460,6 +661,37 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         let y = (viewSize.height - height) / 2
         
         return CGRect(x: x, y: y, width: width, height: height)
+    }
+    
+    func renderStickers(on baseImage: UIImage, for pageIndex: Int) -> UIImage? {
+        let pageSize = baseImage.size
+        UIGraphicsBeginImageContextWithOptions(pageSize, false, 0)
+        defer { UIGraphicsEndImageContext() }
+
+        // Draw the base image
+        baseImage.draw(in: CGRect(origin: .zero, size: pageSize))
+
+        // Draw strokes overlay if exists
+        if let overlay = pageStrokeOverlays[pageIndex] {
+            overlay.draw(in: CGRect(origin: .zero, size: pageSize))
+        }
+
+        // Draw stickers
+        for sticker in stickerContainerView.subviews where sticker is UIImageView {
+            guard let imageView = sticker as? UIImageView, let stickerImage = imageView.image else { continue }
+
+            // Convert frame to PDF coordinate space
+            let frame = imageView.frame
+            let scaleX = pageSize.width / scrollView.bounds.width
+            let scaleY = pageSize.height / scrollView.bounds.height
+            let rect = CGRect(x: frame.origin.x * scaleX,
+                              y: frame.origin.y * scaleY,
+                              width: frame.size.width * scaleX,
+                              height: frame.size.height * scaleY)
+            stickerImage.draw(in: rect)
+        }
+
+        return UIGraphicsGetImageFromCurrentImageContext()
     }
     
     func takeScreenshotCorrect() -> UIImage? {
