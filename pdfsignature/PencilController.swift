@@ -1077,15 +1077,16 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         
         snapshotCurrentStickers()
         
-        // Auto-commit ink on the page we're leaving (same as Save) so history isn't lost.
-        if !canvasView.drawing.strokes.isEmpty {
-            if !commitCurrentPageStrokesIfNeeded() {
-                // Capture failed — keep strokes in `pageDrawings` for when user returns.
-                pageDrawings[currentPageIndex] = canvasView.drawing
-            }
-        } else {
-            pageDrawings[currentPageIndex] = canvasView.drawing
-        }
+//        // Auto-commit ink on the page we're leaving (same as Save) so history isn't lost.
+//        if !canvasView.drawing.strokes.isEmpty {
+//            if !commitCurrentPageStrokesIfNeeded() {
+//                // Capture failed — keep strokes in `pageDrawings` for when user returns.
+//                pageDrawings[currentPageIndex] = canvasView.drawing
+//            }
+//        } else {
+//            pageDrawings[currentPageIndex] = canvasView.drawing
+//        }
+        pageDrawings[currentPageIndex] = PKDrawing()
         
         currentPageIndex = index
         updatePageUI(animated: animated)
