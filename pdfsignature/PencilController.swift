@@ -6,16 +6,16 @@ import MessageUI
 
 class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObserver , UIGestureRecognizerDelegate, UITextViewDelegate,MFMailComposeViewControllerDelegate{
 
-    var canvasView: CustomCanvasView!
+    var canvasView = CustomCanvasView()
     var toolPicker: PKToolPicker!
     var scrollView: UIScrollView!
     var timer: Timer?
     var id = ""
-    var imageView: UIImageView!
-    var overlayImageView: UIImageView!
-    var strokeHistoryView: UIImageView!
-    var saveButton: UIButton!
-    var inputBtn:UIButton!
+    var imageView = UIImageView()
+    var overlayImageView = UIImageView()
+    var strokeHistoryView = UIImageView()
+    var saveButton = UIButton()
+    var inputBtn = UIButton()
     var inputMode = false
     var activityIndicator = UIActivityIndicatorView(style: .medium)
     
@@ -295,9 +295,9 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         strokeHistoryView.contentMode = .scaleAspectFit
         strokeHistoryView.image = pageStrokeOverlays[currentPageIndex] ?? nil
         
-        if let overlayScreenshot = takeScreenshot(of: strokeHistoryView, with: canvasView) {
-            pageStrokeOverlays[currentPageIndex] = overlayScreenshot
-            overlayImageView.image = overlayScreenshot
+        if let overlay = takeScreenshotCorrect() {
+            pageStrokeOverlays[currentPageIndex] = overlay
+            overlayImageView.image = overlay
         }
         
         pageDrawings[currentPageIndex] = PKDrawing()
@@ -444,6 +444,47 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         }
         UIGraphicsEndPDFContext()
         return output as Data
+    }
+    
+    func aspectFitFrame(for image: UIImage, in imageView: UIImageView) -> CGRect {
+        let imageSize = image.size
+        let viewSize = imageView.bounds.size
+        
+        let scale = min(viewSize.width / imageSize.width,
+                        viewSize.height / imageSize.height)
+        
+        let width = imageSize.width * scale
+        let height = imageSize.height * scale
+        
+        let x = (viewSize.width - width) / 2
+        let y = (viewSize.height - height) / 2
+        
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+    
+    func takeScreenshotCorrect() -> UIImage? {
+        guard let baseImage = imageView.image else { return nil }
+        
+        let imageFrame = aspectFitFrame(for: baseImage, in: imageView)
+        
+        let renderer = UIGraphicsImageRenderer(size: baseImage.size)
+        
+        return renderer.image { ctx in
+            // 1. Draw original image
+            baseImage.draw(in: CGRect(origin: .zero, size: baseImage.size))
+            
+            // 2. Map canvas → image coordinates
+            let scaleX = baseImage.size.width / imageFrame.width
+            let scaleY = baseImage.size.height / imageFrame.height
+            
+            ctx.cgContext.translateBy(x: -imageFrame.origin.x * scaleX,
+                                      y: -imageFrame.origin.y * scaleY)
+            
+            ctx.cgContext.scaleBy(x: scaleX, y: scaleY)
+            
+            // 3. Render strokes correctly aligned
+            canvasView.layer.render(in: ctx.cgContext)
+        }
     }
     
 
