@@ -383,7 +383,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         //configureCanvas()
         canvasView.becomeFirstResponder()
         toolPicker.setVisible(true, forFirstResponder: canvasView)
-        self.view.bringSubviewToFront(canvasView)
+        restackScrollSubviewsForHitTesting()
         activityIndicator.isHidden = true
     }
     
@@ -394,7 +394,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         //configureCanvas()
         canvasView.becomeFirstResponder()
         toolPicker.setVisible(true, forFirstResponder: canvasView)
-        self.view.bringSubviewToFront(canvasView)
+        restackScrollSubviewsForHitTesting()
         activityIndicator.isHidden = true
     }
     
@@ -427,7 +427,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         //configureCanvas()
         canvasView.becomeFirstResponder()
         toolPicker.setVisible(true, forFirstResponder: canvasView)
-        self.view.bringSubviewToFront(canvasView)
+        restackScrollSubviewsForHitTesting()
         activityIndicator.isHidden = true
         
     }
@@ -449,26 +449,30 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     
     
     
-    @objc func saveStroke() {
+    /// Merges live canvas ink into `pageStrokeOverlays` for the current page. Returns `false` if there was nothing to commit or capture failed.
+    @discardableResult
+    private func commitCurrentPageStrokesIfNeeded() -> Bool {
+        guard !canvasView.drawing.strokes.isEmpty else { return false }
+        
         let penTool = PKInkingTool(.pen, color: .black, width: 2)
         canvasView.tool = penTool
         
-        // Nothing new to commit and no prior overlay to refresh.
-        if canvasView.drawing.strokes.isEmpty {
-            saveButton.isHidden = true
-            return
-        }
-        
-        // Commit current strokes into the per-page overlay. Must composite on top of any
-        // existing overlay; takeScreenshotCorrect() alone would only draw base + new ink
-        // and would drop all previously saved strokes.
-        guard let overlay = takeScreenshotCorrect() else { return }
+        guard let overlay = takeScreenshotCorrect() else { return false }
         
         pageStrokeOverlays[currentPageIndex] = overlay
         overlayImageView.image = overlay
         pageDrawings[currentPageIndex] = PKDrawing()
         canvasView.drawing = PKDrawing()
         saveButton.isHidden = true
+        return true
+    }
+    
+    @objc func saveStroke() {
+        if canvasView.drawing.strokes.isEmpty {
+            saveButton.isHidden = true
+            return
+        }
+        _ = commitCurrentPageStrokesIfNeeded()
     }
     
     @objc func exportPDF() {
@@ -477,7 +481,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         
         // If there are uncommitted strokes on the current page, commit them before exporting.
         if !canvasView.drawing.strokes.isEmpty {
-            saveStroke()
+            _ = commitCurrentPageStrokesIfNeeded()
         }
         
         // Persist current sticker positions before exporting.
@@ -1049,21 +1053,47 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         guard index >= 0, index < pdfPageImages.count else { return }
         guard index != currentPageIndex else { return }
         
-        // Persist any in-progress drawing for the current page.
-        pageDrawings[currentPageIndex] = canvasView.drawing
         snapshotCurrentStickers()
+        
+        // Auto-commit ink on the page we're leaving (same as Save) so history isn't lost.
+        if !canvasView.drawing.strokes.isEmpty {
+            if !commitCurrentPageStrokesIfNeeded() {
+                // Capture failed — keep strokes in `pageDrawings` for when user returns.
+                pageDrawings[currentPageIndex] = canvasView.drawing
+            }
+        } else {
+            pageDrawings[currentPageIndex] = canvasView.drawing
+        }
         
         currentPageIndex = index
         updatePageUI(animated: animated)
     }
     
+    /// Clears live editing views so the previous page’s ink/stickers never flash on the next page.
+    private func resetLivePageLayers() {
+        canvasView.drawing = PKDrawing()
+        overlayImageView.image = nil
+        stickerContainerView?.subviews.forEach { $0.removeFromSuperview() }
+    }
+    
+    /// Bottom → top: page, committed ink, live ink, stickers (matches intended interaction).
+    private func restackScrollSubviewsForHitTesting() {
+        scrollView.bringSubviewToFront(imageView)
+        scrollView.bringSubviewToFront(overlayImageView)
+        scrollView.bringSubviewToFront(canvasView)
+        scrollView.bringSubviewToFront(stickerContainerView)
+    }
+    
     private func updatePageUI(animated: Bool) {
         guard !pdfPageImages.isEmpty else { return }
+        
+        resetLivePageLayers()
         
         imageView.image = pdfPageImages[currentPageIndex]
         overlayImageView.image = pageStrokeOverlays[currentPageIndex] ?? nil
         canvasView.drawing = pageDrawings[currentPageIndex]
         loadStickers(for: currentPageIndex)
+        restackScrollSubviewsForHitTesting()
         saveButton.isHidden = true
         
         let current = currentPageIndex + 1
