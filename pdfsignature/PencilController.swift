@@ -672,6 +672,20 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         return CGRect(x: x, y: y, width: width, height: height)
     }
     
+    private func aspectFitRect(for contentSize: CGSize, in container: CGRect) -> CGRect {
+        guard contentSize.width > 0, contentSize.height > 0, container.width > 0, container.height > 0 else {
+            return container
+        }
+        
+        let scale = min(container.width / contentSize.width, container.height / contentSize.height)
+        let fittedSize = CGSize(width: contentSize.width * scale, height: contentSize.height * scale)
+        let origin = CGPoint(
+            x: container.midX - fittedSize.width / 2,
+            y: container.midY - fittedSize.height / 2
+        )
+        return CGRect(origin: origin, size: fittedSize)
+    }
+    
     /// Renders a transparent image containing stickers (and optionally strokes) aligned to the PDF page.
     func renderStickersOverlay(for pageIndex: Int, targetSize: CGSize, includeStrokes: Bool = true) -> UIImage? {
         UIGraphicsBeginImageContextWithOptions(targetSize, false, 0)
@@ -720,7 +734,9 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             ctx.translateBy(x: center.x, y: center.y)
             ctx.concatenate(sticker.transform)
             ctx.translateBy(x: -center.x, y: -center.y)
-            sticker.image.draw(in: rect)
+            // Match UIImageView(.scaleAspectFit) so the sticker doesn't get stretched in PDF.
+            let fitted = aspectFitRect(for: sticker.image.size, in: rect)
+            sticker.image.draw(in: fitted)
             ctx.restoreGState()
         }
         
