@@ -25,9 +25,11 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     private var pageDrawings: [PKDrawing] = []
     private var pageStrokeOverlays: [UIImage?] = []
     
+    /// Use center + bounds size + transform. `frame` is undefined when `transform != .identity`, which caused wrong sizes after save/reload.
     private struct StickerSnapshot {
         let image: UIImage
-        let bounds: CGRect
+        let center: CGPoint
+        let boundsSize: CGSize
         let transform: CGAffineTransform
     }
     private var pageStickers: [[StickerSnapshot]] = []
@@ -457,7 +459,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         let penTool = PKInkingTool(.pen, color: .black, width: 2)
         canvasView.tool = penTool
         
-        guard let overlay = takeScreenshotCorrect() else { return false }
+        guard let overlay = takeScreenshotCorrect(forPageIndex: currentPageIndex) else { return false }
         
         pageStrokeOverlays[currentPageIndex] = overlay
         overlayImageView.image = overlay
@@ -653,9 +655,10 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
                 stickerOnly.draw(in: CGRect(origin: .zero, size: size))
             }
             
-            // Draw committed strokes on top
+            // Draw committed strokes on top (aspect-fit if bitmap size ≠ page image size)
             if let overlay = pageStrokeOverlays[i] {
-                overlay.draw(in: CGRect(origin: .zero, size: size))
+                let r = rectAspectFit(imageSize: overlay.size, in: CGRect(origin: .zero, size: size))
+                overlay.draw(in: r)
             }
         }
         UIGraphicsEndPDFContext()
@@ -678,14 +681,30 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         return CGRect(x: x, y: y, width: width, height: height)
     }
     
+    /// Rect that fits `imageSize` inside `container` without stretching (like `UIView.ContentMode.scaleAspectFit`).
+    private func rectAspectFit(imageSize: CGSize, in container: CGRect) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0, container.width > 0, container.height > 0 else {
+            return container
+        }
+        let scale = min(container.width / imageSize.width, container.height / imageSize.height)
+        let fitted = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        return CGRect(
+            x: container.midX - fitted.width / 2,
+            y: container.midY - fitted.height / 2,
+            width: fitted.width,
+            height: fitted.height
+        )
+    }
+    
     /// Renders a transparent image containing stickers (and optionally strokes) aligned to the PDF page.
     func renderStickersOverlay(for pageIndex: Int, targetSize: CGSize, includeStrokes: Bool = true) -> UIImage? {
         UIGraphicsBeginImageContextWithOptions(targetSize, false, 0)
         defer { UIGraphicsEndImageContext() }
         
-        // Draw strokes overlay if requested
+        // Draw strokes overlay if requested (aspect-fit so PDF page size ≠ bitmap size won’t stretch ink)
         if includeStrokes, let overlay = pageStrokeOverlays.indices.contains(pageIndex) ? pageStrokeOverlays[pageIndex] : nil {
-            overlay.draw(in: CGRect(origin: .zero, size: targetSize))
+            let r = rectAspectFit(imageSize: overlay.size, in: CGRect(origin: .zero, size: targetSize))
+            overlay.draw(in: r)
         }
         
         guard pdfPageImages.indices.contains(pageIndex) else {
@@ -701,14 +720,19 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         
         let stickers = pageStickers.indices.contains(pageIndex) ? pageStickers[pageIndex] : []
         for sticker in stickers {
-            let localBounds = sticker.bounds
+            let rectInContainer = CGRect(
+                x: sticker.center.x - sticker.boundsSize.width / 2,
+                y: sticker.center.y - sticker.boundsSize.height / 2,
+                width: sticker.boundsSize.width,
+                height: sticker.boundsSize.height
+            )
             
             // Convert bounds into imageFrame-relative coordinates
             let rectInImageFrame = CGRect(
-                x: localBounds.origin.x - imageFrame.origin.x,
-                y: localBounds.origin.y - imageFrame.origin.y,
-                width: localBounds.size.width,
-                height: localBounds.size.height
+                x: rectInContainer.origin.x - imageFrame.origin.x,
+                y: rectInContainer.origin.y - imageFrame.origin.y,
+                width: rectInContainer.size.width,
+                height: rectInContainer.size.height
             )
             
             // Scale into target (PDF) coordinate space
@@ -719,14 +743,15 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
                 height: rectInImageFrame.size.height * scaleY
             )
             
-            // Apply view transform (scale/rotation) around sticker center
+            // Apply view transform (scale/rotation) around sticker center; draw image aspect-fit in rect (matches UIImageView)
             let center = CGPoint(x: rect.midX, y: rect.midY)
             guard let ctx = UIGraphicsGetCurrentContext() else { continue }
             ctx.saveGState()
             ctx.translateBy(x: center.x, y: center.y)
             ctx.concatenate(sticker.transform)
             ctx.translateBy(x: -center.x, y: -center.y)
-            sticker.image.draw(in: rect)
+            let fitted = rectAspectFit(imageSize: sticker.image.size, in: rect)
+            sticker.image.draw(in: fitted)
             ctx.restoreGState()
         }
         
@@ -737,14 +762,9 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         guard pageStickers.indices.contains(currentPageIndex) else { return }
         let snapshots: [StickerSnapshot] = stickerContainerView.subviews.compactMap { view in
             guard let iv = view as? UIImageView, let img = iv.image else { return nil }
-            return StickerSnapshot(image: img, bounds: iv.bounds.applying(CGAffineTransform(translationX: iv.frame.origin.x, y: iv.frame.origin.y)), transform: iv.transform)
+            return StickerSnapshot(image: img, center: iv.center, boundsSize: iv.bounds.size, transform: iv.transform)
         }
-        // Use iv.frame (already in container coords) instead of bounds+translation if available
-        let corrected: [StickerSnapshot] = stickerContainerView.subviews.compactMap { view in
-            guard let iv = view as? UIImageView, let img = iv.image else { return nil }
-            return StickerSnapshot(image: img, bounds: iv.frame, transform: iv.transform)
-        }
-        pageStickers[currentPageIndex] = corrected.isEmpty ? snapshots : corrected
+        pageStickers[currentPageIndex] = snapshots
     }
     
     private func loadStickers(for pageIndex: Int) {
@@ -754,7 +774,8 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         
         for snapshot in pageStickers[pageIndex] {
             let sticker = UIImageView(image: snapshot.image)
-            sticker.frame = snapshot.bounds
+            sticker.bounds = CGRect(origin: .zero, size: snapshot.boundsSize)
+            sticker.center = snapshot.center
             sticker.transform = snapshot.transform
             sticker.isUserInteractionEnabled = true
             sticker.contentMode = .scaleAspectFit
@@ -775,9 +796,10 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     }
     
     /// Builds a transparent bitmap of committed ink in page space (same size as the page raster).
-    /// Each Save merges prior `pageStrokeOverlays` + new `canvasView` ink so history is not lost.
-    func takeScreenshotCorrect() -> UIImage? {
-        guard let baseImage = imageView.image else { return nil }
+    /// Uses `pdfPageImages[pageIndex]` (not `imageView.image`) so commits never composite against the wrong page after a fast page change.
+    func takeScreenshotCorrect(forPageIndex pageIndex: Int) -> UIImage? {
+        guard pdfPageImages.indices.contains(pageIndex) else { return nil }
+        let baseImage = pdfPageImages[pageIndex]
         
         let imageFrame = aspectFitFrame(for: baseImage, in: imageView)
         guard imageFrame.width > 0, imageFrame.height > 0 else { return nil }
@@ -791,15 +813,15 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             let dest = CGRect(origin: .zero, size: baseImage.size)
             ctx.cgContext.clear(dest)
             
-            // 1. Prior committed strokes (stroke-only layer; do not bake the page PDF in here).
-            if let previous = pageStrokeOverlays[currentPageIndex],
+            // 1. Prior committed strokes for this page only (same pixel size as this page raster).
+            if let previous = pageStrokeOverlays[pageIndex],
                previous.size.width > 0, previous.size.height > 0,
                abs(previous.size.width - baseImage.size.width) < 0.5,
                abs(previous.size.height - baseImage.size.height) < 0.5 {
                 previous.draw(in: dest, blendMode: .normal, alpha: 1)
             }
             
-            // 2. New ink from canvas, aligned to the aspect-fit page rect.
+            // 2. New ink from canvas, aligned to the aspect-fit page rect (only valid while this page is on-screen).
             let scaleX = baseImage.size.width / imageFrame.width
             let scaleY = baseImage.size.height / imageFrame.height
             
@@ -1094,6 +1116,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         imageView.image = pdfPageImages[currentPageIndex]
         overlayImageView.image = pageStrokeOverlays[currentPageIndex] ?? nil
         canvasView.drawing = pageDrawings[currentPageIndex]
+        canvasView.layoutIfNeeded()
         loadStickers(for: currentPageIndex)
         restackScrollSubviewsForHitTesting()
         saveButton.isHidden = true
