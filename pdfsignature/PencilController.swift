@@ -4,19 +4,43 @@ import Vision
 import PencilKit
 import MessageUI
 
-class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObserver , UIGestureRecognizerDelegate, UITextViewDelegate,MFMailComposeViewControllerDelegate{
+class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanvasViewDelegate,PKToolPickerObserver , UIGestureRecognizerDelegate, UITextViewDelegate,MFMailComposeViewControllerDelegate, UINavigationControllerDelegate{
 
-    var canvasView: CustomCanvasView!
+    var canvasView = CustomCanvasView()
+    var stickerContainerView: UIView!
     var toolPicker: PKToolPicker!
     var scrollView: UIScrollView!
     var timer: Timer?
     var id = ""
-    var imageView: UIImageView!
-    var strokeHistoryView: UIImageView!
-    var saveButton: UIButton!
-    var inputBtn:UIButton!
+    var imageView = UIImageView()
+    var overlayImageView = UIImageView()
+    var strokeHistoryView = UIImageView()
+    var saveButton = UIButton()
+    var inputBtn = UIButton()
     var inputMode = false
     var activityIndicator = UIActivityIndicatorView(style: .medium)
+    
+    
+    private var pdfPageImages: [UIImage] = []
+    private var pageDrawings: [PKDrawing] = []
+    private var pageStrokeOverlays: [UIImage?] = []
+    
+    private struct StickerSnapshot {
+        let image: UIImage
+        let bounds: CGRect
+        let transform: CGAffineTransform
+    }
+    private var pageStickers: [[StickerSnapshot]] = []
+    private var currentPageIndex: Int = 0
+    
+    private let bottomBarHeight: CGFloat = 64
+    private var bottomBar: UIView!
+    private var pageNumberScrollView: UIScrollView!
+    private var pageNumberStackView: UIStackView!
+    private var pageButtons: [UIButton] = []
+    private var prevPageButton: UIButton!
+    private var nextPageButton: UIButton!
+    private var pageStatusLabel: UILabel!
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -25,32 +49,52 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         let topMargin: CGFloat = 60
 
         // Create UIScrollView with margin
-        scrollView = UIScrollView(frame: CGRect(x: 0, y: topMargin, width: view.bounds.width, height: view.bounds.height - topMargin))
+        scrollView = UIScrollView(frame: CGRect(x: 0, y: topMargin, width: view.bounds.width, height: view.bounds.height - topMargin - bottomBarHeight))
         scrollView.contentSize = CGSize(width: view.bounds.width * 2, height: view.bounds.height * 2)
         scrollView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(scrollView)
         
-        // Create ImageView
-        if let firstImage = DocumentManager.shared.document {
-            imageView = UIImageView(image: firstImage)
-            imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            scrollView.addSubview(imageView)
-            imageView.contentMode = .scaleAspectFit
-            //initialize
-            strokeHistoryView =  UIImageView(image: firstImage)
-            strokeHistoryView.image = UIImage()
+        // Load PDF pages (multi-page) or fallback to single image.
+        if let pdfURL = DocumentManager.shared.documentURL, let images = convertPDFToPNG(pdfURL: pdfURL), !images.isEmpty {
+            pdfPageImages = images
+        } else if let singleImage = DocumentManager.shared.document {
+            pdfPageImages = [singleImage]
         }
-
-        if DocumentManager.shared.documentURL == nil {
+        
+        if pdfPageImages.isEmpty {
+            activityIndicator.stopAnimating()
+            activityIndicator.isHidden = true
             return
         }
         
-        if DocumentManager.shared.document == nil {
-            return
-        }
+        pageDrawings = Array(repeating: PKDrawing(), count: pdfPageImages.count)
+        pageStrokeOverlays = Array(repeating: nil, count: pdfPageImages.count)
+        pageStickers = Array(repeating: [], count: pdfPageImages.count)
+        currentPageIndex = 0
+        
+        // Create ImageView (base PDF page)
+        imageView = UIImageView(frame: scrollView.bounds)
+        imageView.image = pdfPageImages[currentPageIndex]
+        imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        scrollView.addSubview(imageView)
+        imageView.contentMode = .scaleAspectFit
+        
+        // Overlay view for committed strokes (saved marks)
+        overlayImageView = UIImageView(frame: scrollView.bounds)
+        overlayImageView.backgroundColor = .clear
+        overlayImageView.isOpaque = false
+        overlayImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        overlayImageView.contentMode = .scaleAspectFit
+        scrollView.addSubview(overlayImageView)
+        
+        // Scratch view used only to accumulate overlay screenshots
+        strokeHistoryView = UIImageView(frame: scrollView.bounds)
+        strokeHistoryView.backgroundColor = .clear
+        strokeHistoryView.isOpaque = false
+        strokeHistoryView.image = nil
 
         // Create PKCanvasView
-        canvasView = CustomCanvasView(frame: CGRect(x: 0, y: 0, width: imageView.frame.width, height: imageView.frame.height))
+        canvasView = CustomCanvasView(frame: scrollView.bounds)
         canvasView.backgroundColor = .clear
         canvasView.isOpaque = false
         scrollView.delegate = self
@@ -66,69 +110,82 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
 
       
 
-        // Add reset strokes button
-        let resetStrokeButton = UIButton(type: .system)
-        resetStrokeButton.setTitle("Adjust", for: .normal)
-        resetStrokeButton.addTarget(self, action: #selector(scaleDown), for: .touchUpInside)
-        view.addSubview(resetStrokeButton)
-        resetStrokeButton.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            resetStrokeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            resetStrokeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
-        ])
+        setupPageSelectorBar()
+        updatePageUI(animated: false)
         
-        // Add reset strokes button
+        // Create a horizontal stack for all top buttons
+        let topButtonStack = UIStackView()
+        topButtonStack.axis = .horizontal
+        topButtonStack.spacing = 12
+        topButtonStack.alignment = .center
+        topButtonStack.distribution = .equalSpacing
+        view.addSubview(topButtonStack)
+        topButtonStack.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            topButtonStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
+            topButtonStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10)
+        ])
+
+        // Create buttons
+        let penModeButton = UIButton(type: .system)
+        penModeButton.setTitle("Pen Mode", for: .normal)
+        penModeButton.addTarget(self, action: #selector(switchToPenModeButtonTapped), for: .touchUpInside)
+
+        let adjustButton = UIButton(type: .system)
+        adjustButton.setTitle("Adjust", for: .normal)
+        adjustButton.addTarget(self, action: #selector(scaleDown), for: .touchUpInside)
+
         saveButton = UIButton(type: .system)
         saveButton.setTitle("Save", for: .normal)
         saveButton.setTitleColor(.red, for: .normal)
         saveButton.addTarget(self, action: #selector(saveStroke), for: .touchUpInside)
-        view.addSubview(saveButton)
-        saveButton.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            saveButton.trailingAnchor.constraint(equalTo: resetStrokeButton.leadingAnchor, constant: -20),
-            saveButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
-        ])
         saveButton.isHidden = true
-        
-        
-        // Add reset strokes button
-        let resetStrokeButton3 = UIButton(type: .system)
-        resetStrokeButton3.setTitle("Export", for: .normal)
-        resetStrokeButton3.addTarget(self, action: #selector(exportPDF), for: .touchUpInside)
-        view.addSubview(resetStrokeButton3)
-        resetStrokeButton3.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            resetStrokeButton3.trailingAnchor.constraint(equalTo: saveButton.leadingAnchor, constant: -20),
-            resetStrokeButton3.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
-        ])
-        
-        // Add reset strokes button
+
+        let exportButton = UIButton(type: .system)
+        exportButton.setTitle("Export", for: .normal)
+        exportButton.addTarget(self, action: #selector(exportPDF), for: .touchUpInside)
+
         let importButton = UIButton(type: .system)
         importButton.setTitle("Import", for: .normal)
         importButton.addTarget(self, action: #selector(importPDF), for: .touchUpInside)
-        view.addSubview(importButton)
-        importButton.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            importButton.trailingAnchor.constraint(equalTo: resetStrokeButton3.leadingAnchor, constant: -20),
-            importButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
-        ])
-        
-        // Add reset strokes button
+
         inputBtn = UIButton(type: .system)
         inputBtn.setTitle("Mode:w", for: .normal)
         inputBtn.addTarget(self, action: #selector(switchInput), for: .touchUpInside)
-        view.addSubview(inputBtn)
-        inputBtn.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            inputBtn.trailingAnchor.constraint(equalTo: importButton.leadingAnchor, constant: -20),
-            inputBtn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
-        ])
+
+        let imageButton = UIButton(type: .system)
+        imageButton.setTitle("Images", for: .normal)
+        imageButton.addTarget(self, action: #selector(openImagePicker), for: .touchUpInside)
+
+        // Add all buttons to the stack
+        [topButtonStack.addArrangedSubview(penModeButton),
+         topButtonStack.addArrangedSubview(adjustButton),
+         topButtonStack.addArrangedSubview(saveButton),
+         topButtonStack.addArrangedSubview(exportButton),
+         topButtonStack.addArrangedSubview(importButton),
+         topButtonStack.addArrangedSubview(inputBtn),
+         topButtonStack.addArrangedSubview(imageButton)]
+        
 
         activityIndicator.stopAnimating()
         activityIndicator.isHidden = true
         
         NotificationCenter.default.addObserver(self, selector: #selector(handleNotification), name: Notification.Name("notification"), object: nil)
         
+        //
+        stickerContainerView = UIView(frame: scrollView.bounds)
+        stickerContainerView.backgroundColor = .clear
+        stickerContainerView.isUserInteractionEnabled = true
+        stickerContainerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
+        scrollView.addSubview(stickerContainerView)
+        loadStickers(for: currentPageIndex)
+        
+    }
+    
+    @objc func switchToPenModeButtonTapped() {
+        switchToPenMode()
     }
     
     private func setupActivityIndicator() {
@@ -138,6 +195,150 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         
         // Add it to the view hierarchy
         view.addSubview(activityIndicator)
+    }
+    
+    @objc func openImagePicker() {
+        // Switch to image mode first
+        switchToImageMode()
+            
+        let picker = UIImagePickerController()
+        picker.sourceType = .photoLibrary
+        picker.delegate = self
+        picker.modalPresentationStyle = .fullScreen
+        present(picker, animated: true)
+    }
+    
+    func imagePickerController(_ picker: UIImagePickerController,
+                               didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+        
+        picker.dismiss(animated: true)
+
+        guard let image = info[.originalImage] as? UIImage else { return }
+
+        addSticker(image: image)
+    }
+    
+    func addSticker(image: UIImage) {
+        let sticker = UIImageView(image: image)
+        
+        sticker.frame = CGRect(x: 100, y: 100, width: 150, height: 150)
+        sticker.isUserInteractionEnabled = true
+        sticker.contentMode = .scaleAspectFit
+        
+        // Gestures
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        let rotation = UIRotationGestureRecognizer(target: self, action: #selector(handleRotate(_:)))
+        
+        sticker.addGestureRecognizer(pan)
+        sticker.addGestureRecognizer(pinch)
+        sticker.addGestureRecognizer(rotation)
+        
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleStickerDoubleTapToDelete(_:)))
+        doubleTap.numberOfTapsRequired = 2
+
+        sticker.addGestureRecognizer(doubleTap)
+        
+        stickerContainerView.addSubview(sticker)
+        snapshotCurrentStickers()
+    }
+    
+    @objc func handleStickerDoubleTapToDelete(_ gesture: UITapGestureRecognizer) {
+        guard let sticker = gesture.view else { return }
+        
+        // Optional: add a confirmation alert
+        let alert = UIAlertController(
+            title: "Delete Sticker?",
+            message: "Do you want to remove this sticker?",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive, handler: { _ in
+            sticker.removeFromSuperview()
+        }))
+        
+        present(alert, animated: true)
+    }
+    
+    func switchToPenMode() {
+        // Enable drawing
+        canvasView.isUserInteractionEnabled = true
+        canvasView.becomeFirstResponder()
+        
+        // Disable sticker movement (optional but recommended)
+        stickerContainerView.isUserInteractionEnabled = false
+        
+        // Set pen tool
+        let penTool = PKInkingTool(.pen, color: .black, width: 3)
+        canvasView.tool = penTool
+        
+        showToast("Pen mode enabled ✏️")
+    }
+    
+    func switchToImageMode() {
+        scrollView.isScrollEnabled = true
+        inputBtn.setTitle("Mode: Image", for: .normal)
+        canvasView.isUserInteractionEnabled = false
+        
+        stickerContainerView.isUserInteractionEnabled = true
+        showToast("Image mode enabled 🖼️")
+    }
+    
+    func showToast(_ message: String) {
+        let label = UILabel()
+        label.text = message
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        label.textColor = .white
+        label.textAlignment = .center
+        label.alpha = 0
+        label.layer.cornerRadius = 8
+        label.clipsToBounds = true
+        
+        view.addSubview(label)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            label.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -100),
+            label.widthAnchor.constraint(lessThanOrEqualToConstant: 250)
+        ])
+        
+        UIView.animate(withDuration: 0.3) {
+            label.alpha = 1
+        } completion: { _ in
+            UIView.animate(withDuration: 0.3, delay: 1.5) {
+                label.alpha = 0
+            } completion: { _ in
+                label.removeFromSuperview()
+            }
+        }
+    }
+    
+    @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard let view = gesture.view else { return }
+        let translation = gesture.translation(in: stickerContainerView)
+        
+        view.center = CGPoint(
+            x: view.center.x + translation.x,
+            y: view.center.y + translation.y
+        )
+        
+        gesture.setTranslation(.zero, in: stickerContainerView)
+    }
+    
+    @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        guard let view = gesture.view else { return }
+        
+        view.transform = view.transform.scaledBy(x: gesture.scale, y: gesture.scale)
+        gesture.scale = 1
+    }
+    
+    @objc func handleRotate(_ gesture: UIRotationGestureRecognizer) {
+        guard let view = gesture.view else { return }
+        
+        view.transform = view.transform.rotated(by: gesture.rotation)
+        gesture.rotation = 0
     }
     
     //sendEmail
@@ -253,33 +454,39 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         //scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
         let penTool = PKInkingTool(.pen, color: .black, width: 2)
         canvasView.tool = penTool
-        if let screenshot = takeScreenshot(of: imageView, with: canvasView) {
-            imageView.image = screenshot
-            canvasView.drawing = PKDrawing()
-            saveButton.isHidden = true
+        // Commit current strokes into the per-page overlay image (so they persist when switching pages).
+        strokeHistoryView.frame = overlayImageView.bounds
+        strokeHistoryView.contentMode = .scaleAspectFit
+        strokeHistoryView.image = pageStrokeOverlays[currentPageIndex] ?? nil
+        
+        if let overlay = takeScreenshotCorrect() {
+            pageStrokeOverlays[currentPageIndex] = overlay
+            overlayImageView.image = overlay
         }
         
-        //save on SHV
-        if strokeHistoryView != nil, let screenshot = takeScreenshot(of: strokeHistoryView, with: canvasView) {
-            strokeHistoryView.image = screenshot
-            strokeHistoryView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            strokeHistoryView.contentMode = .scaleAspectFit
-        }
+        pageDrawings[currentPageIndex] = PKDrawing()
+        canvasView.drawing = PKDrawing()
+        saveButton.isHidden = true
     }
     
     @objc func exportPDF() {
         let penTool = PKInkingTool(.pen, color: .black, width: 2)
         canvasView.tool = penTool
-        if let screenshot = takeScreenshot(of: imageView, with: canvasView) {
-            
-            if let pdfData = saveStrokeToPDF() {
-                //pdfEmail(data: pdfData)
-                pdfEmail(data: pdfData)
-            }
-            
-            canvasView.drawing = PKDrawing()
-            saveButton.isHidden = true
+        
+        // If there are uncommitted strokes on the current page, commit them before exporting.
+        if !canvasView.drawing.strokes.isEmpty {
+            saveStroke()
         }
+        
+        // Persist current sticker positions before exporting.
+        snapshotCurrentStickers()
+        
+        if let pdfData = saveStrokeToPDF() {
+            pdfEmail(data: pdfData)
+        }
+        
+        canvasView.drawing = PKDrawing()
+        saveButton.isHidden = true
     }
     
     // Function to convert a UIImage to PDF
@@ -305,11 +512,19 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         let fileManager = FileManager.default
         let documentsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
         let pdfPath = documentsPath?.appendingPathComponent("screenshot.pdf")
+        let imageToExport = renderPageForExport()
         
-        do {
+        let pdfRenderer = UIGraphicsPDFRenderer(bounds: CGRect(origin: .zero, size: imageToExport.size))
+        
+        let data = pdfRenderer.pdfData { ctx in
+            ctx.beginPage()
+            imageToExport.draw(at: .zero)
+        }
+        
+        do{
             try data.write(to: pdfPath!)
             print("PDF saved to: \(pdfPath!)")
-        } catch {
+        }catch{
             print("Failed to save PDF: \(error)")
         }
     }
@@ -324,6 +539,28 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         if !scrollView.isScrollEnabled{
             inputBtn.setTitle("Mode:w", for: .normal)
         }
+    }
+    
+    func renderPageForExport() -> UIImage {
+        let pageSize = pdfPageImages[currentPageIndex].size
+
+        UIGraphicsBeginImageContextWithOptions(pageSize, false, 0)
+        defer { UIGraphicsEndImageContext() }
+
+        // Draw base PDF page
+        pdfPageImages[currentPageIndex].draw(in: CGRect(origin: .zero, size: pageSize))
+        
+        // Draw pen strokes
+        let drawingImage = canvasView.drawing.image(from: canvasView.bounds, scale: 1.0)
+        drawingImage.draw(in: CGRect(origin: .zero, size: pageSize))
+
+        // Draw all sticker images
+        for sticker in stickerContainerView.subviews where sticker is UIImageView {
+            guard let imageView = sticker as? UIImageView else { continue }
+            imageView.image?.draw(in: imageView.frame)
+        }
+
+        return UIGraphicsGetImageFromCurrentImageContext() ?? pdfPageImages[currentPageIndex]
     }
     
     @objc func importPDF() {
@@ -368,32 +605,192 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     }
 
     func saveStrokeToPDF() -> Data? {
-        guard let existingPDF = DocumentManager.shared.document,
-              let pdfDocument = PDFDocument(url: DocumentManager.shared.documentURL!) else {
-            print("No existing PDF document found.")
-            return nil
-        }
-
-        // Create a renderer to capture the canvas view
-        let renderer = UIGraphicsImageRenderer(size: strokeHistoryView.bounds.size)
-
-        // Get the first page of the PDF
-        if let pdfPage = pdfDocument.page(at: 0) {
-            let pdfPageBounds = pdfPage.bounds(for: .mediaBox)
-
-            // Resize the canvas image to match the PDF page size
-            if let resizedCanvasImage = resizeImage(image: strokeHistoryView.image!, targetSize: pdfPageBounds.size) {
-                // Create a new annotation
+        // If we have an original PDF, add overlay annotations to it.
+        if let pdfURL = DocumentManager.shared.documentURL, let pdfDocument = PDFDocument(url: pdfURL) {
+            // Add an overlay annotation per page (strokes + stickers).
+            let pageCount = min(pdfDocument.pageCount, pageStrokeOverlays.count, pageStickers.count)
+            for pageIndex in 0..<pageCount {
+                guard let pdfPage = pdfDocument.page(at: pageIndex) else { continue }
+                
+                let pdfPageBounds = pdfPage.bounds(for: .mediaBox)
+                
+                // Build a transparent overlay image for this page.
+                guard let composedOverlay = renderStickersOverlay(
+                    for: pageIndex,
+                    targetSize: pdfPageBounds.size
+                ) else { continue }
+                
                 let imageBounds = CGRect(x: 0, y: 0, width: pdfPageBounds.width, height: pdfPageBounds.height)
-                let annotation = PDFImageAnnotation(resizedCanvasImage, bounds: imageBounds, properties: nil)
-
-                // Add the annotation to the page
+                let annotation = PDFImageAnnotation(composedOverlay, bounds: imageBounds, properties: nil)
                 pdfPage.addAnnotation(annotation)
             }
+            
+            return pdfDocument.dataRepresentation()
         }
-
-        // Return the modified PDF as Data
-        return pdfDocument.dataRepresentation()
+        
+        // Otherwise, generate a new PDF from the rendered pages (base + overlays).
+        guard !pdfPageImages.isEmpty else { return nil }
+        
+        let output = NSMutableData()
+        let firstSize = pdfPageImages[0].size
+        UIGraphicsBeginPDFContextToData(output, CGRect(origin: .zero, size: firstSize), nil)
+        for i in 0..<pdfPageImages.count {
+            let base = pdfPageImages[i]
+            let size = base.size
+            UIGraphicsBeginPDFPageWithInfo(CGRect(origin: .zero, size: size), nil)
+            
+            // Draw base
+            base.draw(in: CGRect(origin: .zero, size: size))
+            
+            // Draw stickers (no base)
+            if let stickerOnly = renderStickersOverlay(for: i, targetSize: size, includeStrokes: false) {
+                stickerOnly.draw(in: CGRect(origin: .zero, size: size))
+            }
+            
+            // Draw committed strokes on top
+            if let overlay = pageStrokeOverlays[i] {
+                overlay.draw(in: CGRect(origin: .zero, size: size))
+            }
+        }
+        UIGraphicsEndPDFContext()
+        return output as Data
+    }
+    
+    func aspectFitFrame(for image: UIImage, in imageView: UIImageView) -> CGRect {
+        let imageSize = image.size
+        let viewSize = imageView.bounds.size
+        
+        let scale = min(viewSize.width / imageSize.width,
+                        viewSize.height / imageSize.height)
+        
+        let width = imageSize.width * scale
+        let height = imageSize.height * scale
+        
+        let x = (viewSize.width - width) / 2
+        let y = (viewSize.height - height) / 2
+        
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+    
+    /// Renders a transparent image containing stickers (and optionally strokes) aligned to the PDF page.
+    func renderStickersOverlay(for pageIndex: Int, targetSize: CGSize, includeStrokes: Bool = true) -> UIImage? {
+        UIGraphicsBeginImageContextWithOptions(targetSize, false, 0)
+        defer { UIGraphicsEndImageContext() }
+        
+        // Draw strokes overlay if requested
+        if includeStrokes, let overlay = pageStrokeOverlays.indices.contains(pageIndex) ? pageStrokeOverlays[pageIndex] : nil {
+            overlay.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+        
+        guard pdfPageImages.indices.contains(pageIndex) else {
+            return UIGraphicsGetImageFromCurrentImageContext()
+        }
+        
+        // Map from on-screen coordinates (stickerContainerView) to image coordinates using aspect-fit frame.
+        let baseImage = pdfPageImages[pageIndex]
+        let imageFrame = aspectFitFrame(for: baseImage, in: imageView)
+        
+        let scaleX = targetSize.width / imageFrame.width
+        let scaleY = targetSize.height / imageFrame.height
+        
+        let stickers = pageStickers.indices.contains(pageIndex) ? pageStickers[pageIndex] : []
+        for sticker in stickers {
+            let localBounds = sticker.bounds
+            
+            // Convert bounds into imageFrame-relative coordinates
+            let rectInImageFrame = CGRect(
+                x: localBounds.origin.x - imageFrame.origin.x,
+                y: localBounds.origin.y - imageFrame.origin.y,
+                width: localBounds.size.width,
+                height: localBounds.size.height
+            )
+            
+            // Scale into target (PDF) coordinate space
+            let rect = CGRect(
+                x: rectInImageFrame.origin.x * scaleX,
+                y: rectInImageFrame.origin.y * scaleY,
+                width: rectInImageFrame.size.width * scaleX,
+                height: rectInImageFrame.size.height * scaleY
+            )
+            
+            // Apply view transform (scale/rotation) around sticker center
+            let center = CGPoint(x: rect.midX, y: rect.midY)
+            guard let ctx = UIGraphicsGetCurrentContext() else { continue }
+            ctx.saveGState()
+            ctx.translateBy(x: center.x, y: center.y)
+            ctx.concatenate(sticker.transform)
+            ctx.translateBy(x: -center.x, y: -center.y)
+            sticker.image.draw(in: rect)
+            ctx.restoreGState()
+        }
+        
+        return UIGraphicsGetImageFromCurrentImageContext()
+    }
+    
+    private func snapshotCurrentStickers() {
+        guard pageStickers.indices.contains(currentPageIndex) else { return }
+        let snapshots: [StickerSnapshot] = stickerContainerView.subviews.compactMap { view in
+            guard let iv = view as? UIImageView, let img = iv.image else { return nil }
+            return StickerSnapshot(image: img, bounds: iv.bounds.applying(CGAffineTransform(translationX: iv.frame.origin.x, y: iv.frame.origin.y)), transform: iv.transform)
+        }
+        // Use iv.frame (already in container coords) instead of bounds+translation if available
+        let corrected: [StickerSnapshot] = stickerContainerView.subviews.compactMap { view in
+            guard let iv = view as? UIImageView, let img = iv.image else { return nil }
+            return StickerSnapshot(image: img, bounds: iv.frame, transform: iv.transform)
+        }
+        pageStickers[currentPageIndex] = corrected.isEmpty ? snapshots : corrected
+    }
+    
+    private func loadStickers(for pageIndex: Int) {
+        guard stickerContainerView != nil else { return }
+        stickerContainerView.subviews.forEach { $0.removeFromSuperview() }
+        guard pageStickers.indices.contains(pageIndex) else { return }
+        
+        for snapshot in pageStickers[pageIndex] {
+            let sticker = UIImageView(image: snapshot.image)
+            sticker.frame = snapshot.bounds
+            sticker.transform = snapshot.transform
+            sticker.isUserInteractionEnabled = true
+            sticker.contentMode = .scaleAspectFit
+            
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+            let rotation = UIRotationGestureRecognizer(target: self, action: #selector(handleRotate(_:)))
+            sticker.addGestureRecognizer(pan)
+            sticker.addGestureRecognizer(pinch)
+            sticker.addGestureRecognizer(rotation)
+            
+            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleStickerDoubleTapToDelete(_:)))
+            doubleTap.numberOfTapsRequired = 2
+            sticker.addGestureRecognizer(doubleTap)
+            
+            stickerContainerView.addSubview(sticker)
+        }
+    }
+    
+    func takeScreenshotCorrect() -> UIImage? {
+        guard let baseImage = imageView.image else { return nil }
+        
+        let imageFrame = aspectFitFrame(for: baseImage, in: imageView)
+        
+        let renderer = UIGraphicsImageRenderer(size: baseImage.size)
+        
+        return renderer.image { ctx in
+            // 1. Draw original image
+            baseImage.draw(in: CGRect(origin: .zero, size: baseImage.size))
+            
+            // 2. Map canvas → image coordinates
+            let scaleX = baseImage.size.width / imageFrame.width
+            let scaleY = baseImage.size.height / imageFrame.height
+            
+            ctx.cgContext.translateBy(x: -imageFrame.origin.x * scaleX,
+                                      y: -imageFrame.origin.y * scaleY)
+            
+            ctx.cgContext.scaleBy(x: scaleX, y: scaleY)
+            
+            // 3. Render strokes correctly aligned
+            canvasView.layer.render(in: ctx.cgContext)
+        }
     }
     
 
@@ -455,9 +852,20 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
     override func viewDidLayoutSubviews() {
            super.viewDidLayoutSubviews()
 
-        if (canvasView != nil){
-            // Update the canvasView frame to match the scrollView contentSize
-            canvasView.frame = CGRect(x: 0, y: 0, width: scrollView.contentSize.width, height: scrollView.contentSize.height)
+        // Keep the scroll area above the bottom bar.
+        let topMargin: CGFloat = 60
+        scrollView.frame = CGRect(
+            x: 0,
+            y: topMargin,
+            width: view.bounds.width,
+            height: view.bounds.height - topMargin - bottomBarHeight - view.safeAreaInsets.bottom
+        )
+        scrollView.contentSize = scrollView.bounds.size
+        
+        if canvasView != nil {
+            imageView.frame = scrollView.bounds
+            overlayImageView.frame = scrollView.bounds
+            canvasView.frame = scrollView.bounds
         }
        }
     
@@ -512,6 +920,158 @@ class PencilController: UIViewController, PKCanvasViewDelegate,PKToolPickerObser
         }
         
         return pngImages
+    }
+    
+    // MARK: - Page selector bar (multi-page)
+    private func setupPageSelectorBar() {
+        bottomBar = UIView()
+        bottomBar.translatesAutoresizingMaskIntoConstraints = false
+        bottomBar.backgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.95)
+        view.addSubview(bottomBar)
+        
+        NSLayoutConstraint.activate([
+            bottomBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bottomBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomBar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            bottomBar.heightAnchor.constraint(equalToConstant: bottomBarHeight)
+        ])
+        
+        prevPageButton = UIButton(type: .system)
+        prevPageButton.setTitle("◀︎", for: .normal)
+        prevPageButton.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
+        prevPageButton.addTarget(self, action: #selector(goToPreviousPage), for: .touchUpInside)
+        prevPageButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        nextPageButton = UIButton(type: .system)
+        nextPageButton.setTitle("▶︎", for: .normal)
+        nextPageButton.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
+        nextPageButton.addTarget(self, action: #selector(goToNextPage), for: .touchUpInside)
+        nextPageButton.translatesAutoresizingMaskIntoConstraints = false
+        
+        pageStatusLabel = UILabel()
+        pageStatusLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        pageStatusLabel.textColor = .secondaryLabel
+        pageStatusLabel.textAlignment = .center
+        pageStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        pageNumberScrollView = UIScrollView()
+        pageNumberScrollView.showsHorizontalScrollIndicator = false
+        pageNumberScrollView.translatesAutoresizingMaskIntoConstraints = false
+        
+        pageNumberStackView = UIStackView()
+        pageNumberStackView.axis = .horizontal
+        pageNumberStackView.spacing = 8
+        pageNumberStackView.alignment = .center
+        pageNumberStackView.translatesAutoresizingMaskIntoConstraints = false
+        pageNumberScrollView.addSubview(pageNumberStackView)
+        
+        bottomBar.addSubview(prevPageButton)
+        bottomBar.addSubview(nextPageButton)
+        bottomBar.addSubview(pageNumberScrollView)
+        bottomBar.addSubview(pageStatusLabel)
+        
+        NSLayoutConstraint.activate([
+            prevPageButton.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor, constant: 12),
+            prevPageButton.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
+            prevPageButton.widthAnchor.constraint(equalToConstant: 44),
+            prevPageButton.heightAnchor.constraint(equalToConstant: 44),
+            
+            nextPageButton.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor, constant: -12),
+            nextPageButton.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
+            nextPageButton.widthAnchor.constraint(equalToConstant: 44),
+            nextPageButton.heightAnchor.constraint(equalToConstant: 44),
+            
+            pageStatusLabel.leadingAnchor.constraint(equalTo: prevPageButton.trailingAnchor, constant: 8),
+            pageStatusLabel.trailingAnchor.constraint(equalTo: nextPageButton.leadingAnchor, constant: -8),
+            pageStatusLabel.topAnchor.constraint(equalTo: bottomBar.topAnchor, constant: 6),
+            pageStatusLabel.heightAnchor.constraint(equalToConstant: 16),
+            
+            pageNumberScrollView.leadingAnchor.constraint(equalTo: prevPageButton.trailingAnchor, constant: 8),
+            pageNumberScrollView.trailingAnchor.constraint(equalTo: nextPageButton.leadingAnchor, constant: -8),
+            pageNumberScrollView.topAnchor.constraint(equalTo: pageStatusLabel.bottomAnchor, constant: 6),
+            pageNumberScrollView.bottomAnchor.constraint(equalTo: bottomBar.bottomAnchor, constant: -6),
+            
+            pageNumberStackView.leadingAnchor.constraint(equalTo: pageNumberScrollView.contentLayoutGuide.leadingAnchor),
+            pageNumberStackView.trailingAnchor.constraint(equalTo: pageNumberScrollView.contentLayoutGuide.trailingAnchor),
+            pageNumberStackView.topAnchor.constraint(equalTo: pageNumberScrollView.contentLayoutGuide.topAnchor),
+            pageNumberStackView.bottomAnchor.constraint(equalTo: pageNumberScrollView.contentLayoutGuide.bottomAnchor),
+            pageNumberStackView.heightAnchor.constraint(equalTo: pageNumberScrollView.frameLayoutGuide.heightAnchor)
+        ])
+        
+        rebuildPageButtons()
+    }
+    
+    private func rebuildPageButtons() {
+        pageButtons.forEach { $0.removeFromSuperview() }
+        pageButtons.removeAll()
+        
+        guard !pdfPageImages.isEmpty else { return }
+        for i in 0..<pdfPageImages.count {
+            let button = UIButton(type: .system)
+            button.setTitle("\(i + 1)", for: .normal)
+            button.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+            button.layer.cornerRadius = 10
+            button.layer.borderWidth = 1
+            button.contentEdgeInsets = UIEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+            button.tag = i
+            button.addTarget(self, action: #selector(selectPageFromButton(_:)), for: .touchUpInside)
+            pageNumberStackView.addArrangedSubview(button)
+            pageButtons.append(button)
+        }
+    }
+    
+    @objc private func selectPageFromButton(_ sender: UIButton) {
+        goToPage(sender.tag, animated: true)
+    }
+    
+    @objc private func goToPreviousPage() {
+        goToPage(max(0, currentPageIndex - 1), animated: true)
+    }
+    
+    @objc private func goToNextPage() {
+        goToPage(min(pdfPageImages.count - 1, currentPageIndex + 1), animated: true)
+    }
+    
+    private func goToPage(_ index: Int, animated: Bool) {
+        guard index >= 0, index < pdfPageImages.count else { return }
+        guard index != currentPageIndex else { return }
+        
+        // Persist any in-progress drawing for the current page.
+        pageDrawings[currentPageIndex] = canvasView.drawing
+        snapshotCurrentStickers()
+        
+        currentPageIndex = index
+        updatePageUI(animated: animated)
+    }
+    
+    private func updatePageUI(animated: Bool) {
+        guard !pdfPageImages.isEmpty else { return }
+        
+        imageView.image = pdfPageImages[currentPageIndex]
+        overlayImageView.image = pageStrokeOverlays[currentPageIndex] ?? nil
+        canvasView.drawing = pageDrawings[currentPageIndex]
+        loadStickers(for: currentPageIndex)
+        saveButton.isHidden = true
+        
+        let current = currentPageIndex + 1
+        pageStatusLabel.text = "Page \(current) / \(pdfPageImages.count)"
+        
+        prevPageButton.isEnabled = currentPageIndex > 0
+        nextPageButton.isEnabled = currentPageIndex < pdfPageImages.count - 1
+        
+        for (i, button) in pageButtons.enumerated() {
+            let isSelected = i == currentPageIndex
+            button.layer.borderColor = (isSelected ? UIColor.systemBlue : UIColor.tertiaryLabel).cgColor
+            button.setTitleColor(isSelected ? .white : .label, for: .normal)
+            button.backgroundColor = isSelected ? .systemBlue : .clear
+        }
+        
+        // Ensure the selected page button is visible.
+        if currentPageIndex < pageButtons.count {
+            let selectedButton = pageButtons[currentPageIndex]
+            let targetRect = selectedButton.convert(selectedButton.bounds, to: pageNumberScrollView)
+            pageNumberScrollView.scrollRectToVisible(targetRect.insetBy(dx: -20, dy: 0), animated: animated)
+        }
     }
     
 }
