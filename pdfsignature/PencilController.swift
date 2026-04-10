@@ -24,6 +24,13 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     private var pdfPageImages: [UIImage] = []
     private var pageDrawings: [PKDrawing] = []
     private var pageStrokeOverlays: [UIImage?] = []
+    
+    private struct StickerSnapshot {
+        let image: UIImage
+        let bounds: CGRect
+        let transform: CGAffineTransform
+    }
+    private var pageStickers: [[StickerSnapshot]] = []
     private var currentPageIndex: Int = 0
     
     private let bottomBarHeight: CGFloat = 64
@@ -62,6 +69,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         
         pageDrawings = Array(repeating: PKDrawing(), count: pdfPageImages.count)
         pageStrokeOverlays = Array(repeating: nil, count: pdfPageImages.count)
+        pageStickers = Array(repeating: [], count: pdfPageImages.count)
         currentPageIndex = 0
         
         // Create ImageView (base PDF page)
@@ -190,6 +198,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         stickerContainerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
         scrollView.addSubview(stickerContainerView)
+        loadStickers(for: currentPageIndex)
         
     }
     
@@ -242,6 +251,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         sticker.addGestureRecognizer(doubleTap)
         
         stickerContainerView.addSubview(sticker)
+        snapshotCurrentStickers()
     }
     
     @objc func handleStickerDoubleTap(_ gesture: UITapGestureRecognizer) {
@@ -470,6 +480,9 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             saveStroke()
         }
         
+        // Persist current sticker positions before exporting.
+        snapshotCurrentStickers()
+        
         if let pdfData = saveStrokeToPDF() {
             pdfEmail(data: pdfData)
         }
@@ -596,17 +609,21 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     func saveStrokeToPDF() -> Data? {
         // If we have an original PDF, add overlay annotations to it.
         if let pdfURL = DocumentManager.shared.documentURL, let pdfDocument = PDFDocument(url: pdfURL) {
-            // Add an overlay annotation per page (if any strokes were committed on that page).
-            let pageCount = min(pdfDocument.pageCount, pageStrokeOverlays.count)
+            // Add an overlay annotation per page (strokes + stickers).
+            let pageCount = min(pdfDocument.pageCount, pageStrokeOverlays.count, pageStickers.count)
             for pageIndex in 0..<pageCount {
-                guard let overlay = pageStrokeOverlays[pageIndex] else { continue }
                 guard let pdfPage = pdfDocument.page(at: pageIndex) else { continue }
                 
                 let pdfPageBounds = pdfPage.bounds(for: .mediaBox)
-                guard let resizedOverlay = resizeImage(image: overlay, targetSize: pdfPageBounds.size) else { continue }
+                
+                // Build a transparent overlay image for this page.
+                guard let composedOverlay = renderStickersOverlay(
+                    for: pageIndex,
+                    targetSize: pdfPageBounds.size
+                ) else { continue }
                 
                 let imageBounds = CGRect(x: 0, y: 0, width: pdfPageBounds.width, height: pdfPageBounds.height)
-                let annotation = PDFImageAnnotation(resizedOverlay, bounds: imageBounds, properties: nil)
+                let annotation = PDFImageAnnotation(composedOverlay, bounds: imageBounds, properties: nil)
                 pdfPage.addAnnotation(annotation)
             }
             
@@ -623,22 +640,16 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             let base = pdfPageImages[i]
             let size = base.size
             UIGraphicsBeginPDFPageWithInfo(CGRect(origin: .zero, size: size), nil)
-            var composed = base
-
-            // 1. Add stickers
-            if i == currentPageIndex {
-                if let withStickers = renderStickers(on: composed, for: i) {
-                    composed = withStickers
-                }
+            
+            // Draw base
+            base.draw(in: CGRect(origin: .zero, size: size))
+            
+            // Draw stickers (no base)
+            if let stickerOnly = renderStickersOverlay(for: i, targetSize: size, includeStrokes: false) {
+                stickerOnly.draw(in: CGRect(origin: .zero, size: size))
             }
-
-            // 2. Draw result
-//            composed.draw(in: CGRect(origin: .zero, size: size))
-            if let composed = renderStickers(on: pdfPageImages[i], for: i) {
-                composed.draw(in: CGRect(origin: .zero, size: pdfPageImages[i].size))
-            }
-
-            // 3. Add strokes on top
+            
+            // Draw committed strokes on top
             if let overlay = pageStrokeOverlays[i] {
                 overlay.draw(in: CGRect(origin: .zero, size: size))
             }
@@ -663,35 +674,100 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         return CGRect(x: x, y: y, width: width, height: height)
     }
     
-    func renderStickers(on baseImage: UIImage, for pageIndex: Int) -> UIImage? {
-        let pageSize = baseImage.size
-        UIGraphicsBeginImageContextWithOptions(pageSize, false, 0)
+    /// Renders a transparent image containing stickers (and optionally strokes) aligned to the PDF page.
+    func renderStickersOverlay(for pageIndex: Int, targetSize: CGSize, includeStrokes: Bool = true) -> UIImage? {
+        UIGraphicsBeginImageContextWithOptions(targetSize, false, 0)
         defer { UIGraphicsEndImageContext() }
-
-        // Draw the base image
-        baseImage.draw(in: CGRect(origin: .zero, size: pageSize))
-
-        // Draw strokes overlay if exists
-        if let overlay = pageStrokeOverlays[pageIndex] {
-            overlay.draw(in: CGRect(origin: .zero, size: pageSize))
+        
+        // Draw strokes overlay if requested
+        if includeStrokes, let overlay = pageStrokeOverlays.indices.contains(pageIndex) ? pageStrokeOverlays[pageIndex] : nil {
+            overlay.draw(in: CGRect(origin: .zero, size: targetSize))
         }
-
-        // Draw stickers
-        for sticker in stickerContainerView.subviews where sticker is UIImageView {
-            guard let imageView = sticker as? UIImageView, let stickerImage = imageView.image else { continue }
-
-            // Convert frame to PDF coordinate space
-            let frame = imageView.frame
-            let scaleX = pageSize.width / scrollView.bounds.width
-            let scaleY = pageSize.height / scrollView.bounds.height
-            let rect = CGRect(x: frame.origin.x * scaleX,
-                              y: frame.origin.y * scaleY,
-                              width: frame.size.width * scaleX,
-                              height: frame.size.height * scaleY)
-            stickerImage.draw(in: rect)
+        
+        guard pdfPageImages.indices.contains(pageIndex) else {
+            return UIGraphicsGetImageFromCurrentImageContext()
         }
-
+        
+        // Map from on-screen coordinates (stickerContainerView) to image coordinates using aspect-fit frame.
+        let baseImage = pdfPageImages[pageIndex]
+        let imageFrame = aspectFitFrame(for: baseImage, in: imageView)
+        
+        let scaleX = targetSize.width / imageFrame.width
+        let scaleY = targetSize.height / imageFrame.height
+        
+        let stickers = pageStickers.indices.contains(pageIndex) ? pageStickers[pageIndex] : []
+        for sticker in stickers {
+            let localBounds = sticker.bounds
+            
+            // Convert bounds into imageFrame-relative coordinates
+            let rectInImageFrame = CGRect(
+                x: localBounds.origin.x - imageFrame.origin.x,
+                y: localBounds.origin.y - imageFrame.origin.y,
+                width: localBounds.size.width,
+                height: localBounds.size.height
+            )
+            
+            // Scale into target (PDF) coordinate space
+            let rect = CGRect(
+                x: rectInImageFrame.origin.x * scaleX,
+                y: rectInImageFrame.origin.y * scaleY,
+                width: rectInImageFrame.size.width * scaleX,
+                height: rectInImageFrame.size.height * scaleY
+            )
+            
+            // Apply view transform (scale/rotation) around sticker center
+            let center = CGPoint(x: rect.midX, y: rect.midY)
+            guard let ctx = UIGraphicsGetCurrentContext() else { continue }
+            ctx.saveGState()
+            ctx.translateBy(x: center.x, y: center.y)
+            ctx.concatenate(sticker.transform)
+            ctx.translateBy(x: -center.x, y: -center.y)
+            sticker.image.draw(in: rect)
+            ctx.restoreGState()
+        }
+        
         return UIGraphicsGetImageFromCurrentImageContext()
+    }
+    
+    private func snapshotCurrentStickers() {
+        guard pageStickers.indices.contains(currentPageIndex) else { return }
+        let snapshots: [StickerSnapshot] = stickerContainerView.subviews.compactMap { view in
+            guard let iv = view as? UIImageView, let img = iv.image else { return nil }
+            return StickerSnapshot(image: img, bounds: iv.bounds.applying(CGAffineTransform(translationX: iv.frame.origin.x, y: iv.frame.origin.y)), transform: iv.transform)
+        }
+        // Use iv.frame (already in container coords) instead of bounds+translation if available
+        let corrected: [StickerSnapshot] = stickerContainerView.subviews.compactMap { view in
+            guard let iv = view as? UIImageView, let img = iv.image else { return nil }
+            return StickerSnapshot(image: img, bounds: iv.frame, transform: iv.transform)
+        }
+        pageStickers[currentPageIndex] = corrected.isEmpty ? snapshots : corrected
+    }
+    
+    private func loadStickers(for pageIndex: Int) {
+        guard stickerContainerView != nil else { return }
+        stickerContainerView.subviews.forEach { $0.removeFromSuperview() }
+        guard pageStickers.indices.contains(pageIndex) else { return }
+        
+        for snapshot in pageStickers[pageIndex] {
+            let sticker = UIImageView(image: snapshot.image)
+            sticker.frame = snapshot.bounds
+            sticker.transform = snapshot.transform
+            sticker.isUserInteractionEnabled = true
+            sticker.contentMode = .scaleAspectFit
+            
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+            let rotation = UIRotationGestureRecognizer(target: self, action: #selector(handleRotate(_:)))
+            sticker.addGestureRecognizer(pan)
+            sticker.addGestureRecognizer(pinch)
+            sticker.addGestureRecognizer(rotation)
+            
+            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleStickerDoubleTap(_:)))
+            doubleTap.numberOfTapsRequired = 2
+            sticker.addGestureRecognizer(doubleTap)
+            
+            stickerContainerView.addSubview(sticker)
+        }
     }
     
     func takeScreenshotCorrect() -> UIImage? {
@@ -964,6 +1040,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         
         // Persist any in-progress drawing for the current page.
         pageDrawings[currentPageIndex] = canvasView.drawing
+        snapshotCurrentStickers()
         
         currentPageIndex = index
         updatePageUI(animated: animated)
@@ -975,6 +1052,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         imageView.image = pdfPageImages[currentPageIndex]
         overlayImageView.image = pageStrokeOverlays[currentPageIndex] ?? nil
         canvasView.drawing = pageDrawings[currentPageIndex]
+        loadStickers(for: currentPageIndex)
         saveButton.isHidden = true
         
         let current = currentPageIndex + 1
