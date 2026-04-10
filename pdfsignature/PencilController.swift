@@ -113,78 +113,60 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         setupPageSelectorBar()
         updatePageUI(animated: false)
         
-        
-        
-        // Add reset strokes button
-        let resetStrokeButton = UIButton(type: .system)
-        resetStrokeButton.setTitle("Adjust", for: .normal)
-        resetStrokeButton.addTarget(self, action: #selector(scaleDown), for: .touchUpInside)
-        view.addSubview(resetStrokeButton)
-        resetStrokeButton.translatesAutoresizingMaskIntoConstraints = false
+        // Create a horizontal stack for all top buttons
+        let topButtonStack = UIStackView()
+        topButtonStack.axis = .horizontal
+        topButtonStack.spacing = 12
+        topButtonStack.alignment = .center
+        topButtonStack.distribution = .equalSpacing
+        view.addSubview(topButtonStack)
+        topButtonStack.translatesAutoresizingMaskIntoConstraints = false
+
         NSLayoutConstraint.activate([
-            resetStrokeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            resetStrokeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
+            topButtonStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
+            topButtonStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10)
         ])
-        
-        // Add reset strokes button
+
+        // Create buttons
+        let penModeButton = UIButton(type: .system)
+        penModeButton.setTitle("Pen Mode", for: .normal)
+        penModeButton.addTarget(self, action: #selector(switchToPenModeButtonTapped), for: .touchUpInside)
+
+        let adjustButton = UIButton(type: .system)
+        adjustButton.setTitle("Adjust", for: .normal)
+        adjustButton.addTarget(self, action: #selector(scaleDown), for: .touchUpInside)
+
         saveButton = UIButton(type: .system)
         saveButton.setTitle("Save", for: .normal)
         saveButton.setTitleColor(.red, for: .normal)
         saveButton.addTarget(self, action: #selector(saveStroke), for: .touchUpInside)
-        view.addSubview(saveButton)
-        saveButton.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            saveButton.trailingAnchor.constraint(equalTo: resetStrokeButton.leadingAnchor, constant: -20),
-            saveButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
-        ])
         saveButton.isHidden = true
-        
-        
-        // Add reset strokes button
-        let resetStrokeButton3 = UIButton(type: .system)
-        resetStrokeButton3.setTitle("Export", for: .normal)
-        resetStrokeButton3.addTarget(self, action: #selector(exportPDF), for: .touchUpInside)
-        view.addSubview(resetStrokeButton3)
-        resetStrokeButton3.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            resetStrokeButton3.trailingAnchor.constraint(equalTo: saveButton.leadingAnchor, constant: -20),
-            resetStrokeButton3.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
-        ])
-        
-        // Add reset strokes button
+
+        let exportButton = UIButton(type: .system)
+        exportButton.setTitle("Export", for: .normal)
+        exportButton.addTarget(self, action: #selector(exportPDF), for: .touchUpInside)
+
         let importButton = UIButton(type: .system)
         importButton.setTitle("Import", for: .normal)
         importButton.addTarget(self, action: #selector(importPDF), for: .touchUpInside)
-        view.addSubview(importButton)
-        importButton.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            importButton.trailingAnchor.constraint(equalTo: resetStrokeButton3.leadingAnchor, constant: -20),
-            importButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
-        ])
-        
-        // Add reset strokes button
+
         inputBtn = UIButton(type: .system)
         inputBtn.setTitle("Mode:w", for: .normal)
         inputBtn.addTarget(self, action: #selector(switchInput), for: .touchUpInside)
-        view.addSubview(inputBtn)
-        inputBtn.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            inputBtn.trailingAnchor.constraint(equalTo: importButton.leadingAnchor, constant: -20),
-            inputBtn.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
-        ])
-        
-        //images
+
         let imageButton = UIButton(type: .system)
         imageButton.setTitle("Images", for: .normal)
         imageButton.addTarget(self, action: #selector(openImagePicker), for: .touchUpInside)
 
-        view.addSubview(imageButton)
-        imageButton.translatesAutoresizingMaskIntoConstraints = false
-
-        NSLayoutConstraint.activate([
-            imageButton.trailingAnchor.constraint(equalTo: inputBtn.leadingAnchor, constant: -20),
-            imageButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20)
-        ])
+        // Add all buttons to the stack
+        [topButtonStack.addArrangedSubview(penModeButton),
+         topButtonStack.addArrangedSubview(adjustButton),
+         topButtonStack.addArrangedSubview(saveButton),
+         topButtonStack.addArrangedSubview(exportButton),
+         topButtonStack.addArrangedSubview(importButton),
+         topButtonStack.addArrangedSubview(inputBtn),
+         topButtonStack.addArrangedSubview(imageButton)]
+        
 
         activityIndicator.stopAnimating()
         activityIndicator.isHidden = true
@@ -202,6 +184,10 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         
     }
     
+    @objc func switchToPenModeButtonTapped() {
+        switchToPenMode()
+    }
+    
     private func setupActivityIndicator() {
         // Set the center and color of the activity indicator
         activityIndicator.center = view.center
@@ -212,6 +198,9 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     }
     
     @objc func openImagePicker() {
+        // Switch to image mode first
+        switchToImageMode()
+            
         let picker = UIImagePickerController()
         picker.sourceType = .photoLibrary
         picker.delegate = self
@@ -245,7 +234,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         sticker.addGestureRecognizer(pinch)
         sticker.addGestureRecognizer(rotation)
         
-        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleStickerDoubleTap(_:)))
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleStickerDoubleTapToDelete(_:)))
         doubleTap.numberOfTapsRequired = 2
 
         sticker.addGestureRecognizer(doubleTap)
@@ -254,19 +243,19 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         snapshotCurrentStickers()
     }
     
-    @objc func handleStickerDoubleTap(_ gesture: UITapGestureRecognizer) {
-        guard gesture.view != nil else { return }
+    @objc func handleStickerDoubleTapToDelete(_ gesture: UITapGestureRecognizer) {
+        guard let sticker = gesture.view else { return }
         
+        // Optional: add a confirmation alert
         let alert = UIAlertController(
-            title: "Switch to Draw Mode?",
-            message: "Do you want to switch to pen mode and start drawing?",
+            title: "Delete Sticker?",
+            message: "Do you want to remove this sticker?",
             preferredStyle: .alert
         )
         
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        
-        alert.addAction(UIAlertAction(title: "Yes", style: .default, handler: { [weak self] _ in
-            self?.switchToPenMode()
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive, handler: { _ in
+            sticker.removeFromSuperview()
         }))
         
         present(alert, animated: true)
@@ -285,6 +274,15 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         canvasView.tool = penTool
         
         showToast("Pen mode enabled ✏️")
+    }
+    
+    func switchToImageMode() {
+        scrollView.isScrollEnabled = true
+        inputBtn.setTitle("Mode: Image", for: .normal)
+        canvasView.isUserInteractionEnabled = false
+        
+        stickerContainerView.isUserInteractionEnabled = true
+        showToast("Image mode enabled 🖼️")
     }
     
     func showToast(_ message: String) {
@@ -762,7 +760,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             sticker.addGestureRecognizer(pinch)
             sticker.addGestureRecognizer(rotation)
             
-            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleStickerDoubleTap(_:)))
+            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleStickerDoubleTapToDelete(_:)))
             doubleTap.numberOfTapsRequired = 2
             sticker.addGestureRecognizer(doubleTap)
             

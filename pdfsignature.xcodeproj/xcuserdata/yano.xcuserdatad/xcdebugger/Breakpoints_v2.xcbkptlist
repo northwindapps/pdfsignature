@@ -94,8 +94,8 @@
             filePath = "pdfsignature/PencilController.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "493"
-            endingLineNumber = "493"
+            startingLineNumber = "501"
+            endingLineNumber = "501"
             landmarkName = "convertImageToPDF(image:)"
             landmarkType = "7">
          </BreakpointContent>
