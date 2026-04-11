@@ -4,10 +4,12 @@ import Vision
 import PencilKit
 import MessageUI
 
-class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanvasViewDelegate,PKToolPickerObserver , UIGestureRecognizerDelegate, UITextViewDelegate,MFMailComposeViewControllerDelegate, UINavigationControllerDelegate{
+class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanvasViewDelegate,PKToolPickerObserver , UIGestureRecognizerDelegate, UITextViewDelegate,MFMailComposeViewControllerDelegate, UINavigationControllerDelegate, UIScrollViewDelegate{
 
     var canvasView = CustomCanvasView()
     var stickerContainerView: UIView!
+    /// Holds page + overlay + canvas + stickers so `UIScrollView` zoom/pan applies to all layers together.
+    private var documentContainerView: UIView!
     var toolPicker: PKToolPicker!
     var scrollView: UIScrollView!
     var timer: Timer?
@@ -52,9 +54,21 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
 
         // Create UIScrollView with margin
         scrollView = UIScrollView(frame: CGRect(x: 0, y: topMargin, width: view.bounds.width, height: view.bounds.height - topMargin - bottomBarHeight))
-        scrollView.contentSize = CGSize(width: view.bounds.width * 2, height: view.bounds.height * 2)
         scrollView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        scrollView.delegate = self
+        scrollView.minimumZoomScale = 1.0
+        scrollView.maximumZoomScale = 5.0
+        scrollView.bouncesZoom = true
+        scrollView.showsHorizontalScrollIndicator = true
+        scrollView.showsVerticalScrollIndicator = true
+        scrollView.alwaysBounceVertical = true
+        scrollView.alwaysBounceHorizontal = true
         view.addSubview(scrollView)
+        
+        documentContainerView = UIView(frame: scrollView.bounds)
+        documentContainerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        documentContainerView.backgroundColor = .clear
+        scrollView.addSubview(documentContainerView)
         
         // Load PDF pages (multi-page) or fallback to single image.
         if let pdfURL = DocumentManager.shared.documentURL, let images = convertPDFToPNG(pdfURL: pdfURL), !images.isEmpty {
@@ -75,36 +89,33 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         currentPageIndex = 0
         
         // Create ImageView (base PDF page)
-        imageView = UIImageView(frame: scrollView.bounds)
+        imageView = UIImageView(frame: documentContainerView.bounds)
         imageView.image = pdfPageImages[currentPageIndex]
         imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        scrollView.addSubview(imageView)
+        documentContainerView.addSubview(imageView)
         imageView.contentMode = .scaleAspectFit
         
         // Overlay view for committed strokes (saved marks)
-        overlayImageView = UIImageView(frame: scrollView.bounds)
+        overlayImageView = UIImageView(frame: documentContainerView.bounds)
         overlayImageView.backgroundColor = .clear
         overlayImageView.isOpaque = false
         overlayImageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         overlayImageView.contentMode = .scaleAspectFit
-        scrollView.addSubview(overlayImageView)
+        documentContainerView.addSubview(overlayImageView)
         
         // Scratch view used only to accumulate overlay screenshots
-        strokeHistoryView = UIImageView(frame: scrollView.bounds)
+        strokeHistoryView = UIImageView(frame: documentContainerView.bounds)
         strokeHistoryView.backgroundColor = .clear
         strokeHistoryView.isOpaque = false
         strokeHistoryView.image = nil
 
         // Create PKCanvasView
-        canvasView = CustomCanvasView(frame: scrollView.bounds)
+        canvasView = CustomCanvasView(frame: documentContainerView.bounds)
         canvasView.backgroundColor = .clear
         canvasView.isOpaque = false
-        scrollView.delegate = self
-        scrollView.addSubview(canvasView)
+        documentContainerView.addSubview(canvasView)
         scrollView.isScrollEnabled = false
-        
-        let pinchGestureRecognizer = UIPinchGestureRecognizer(target: self, action: #selector(handlePinchGesture(_:)))
-            scrollView.addGestureRecognizer(pinchGestureRecognizer)
+        scrollView.contentSize = documentContainerView.bounds.size
         
         canvasView.delegate = self
         canvasView.drawingPolicy = .anyInput
@@ -176,12 +187,12 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         NotificationCenter.default.addObserver(self, selector: #selector(handleNotification), name: Notification.Name("notification"), object: nil)
         
         //
-        stickerContainerView = UIView(frame: scrollView.bounds)
+        stickerContainerView = UIView(frame: documentContainerView.bounds)
         stickerContainerView.backgroundColor = .clear
         stickerContainerView.isUserInteractionEnabled = true
         stickerContainerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
-        scrollView.addSubview(stickerContainerView)
+        documentContainerView.addSubview(stickerContainerView)
         loadStickers(for: currentPageIndex)
         
 //        canvasView.layer.borderWidth = 0.5
@@ -294,6 +305,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         let penTool = PKInkingTool(.pen, color: .black, width: 3)
         canvasView.tool = penTool
         
+        updateScrollInteractionForZoomAndMode()
         showToast("Pen mode enabled ✏️")
     }
     
@@ -397,30 +409,67 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        
-        toolPicker = PKToolPicker()
-        toolPicker.setVisible(true, forFirstResponder: canvasView)
-        toolPicker.addObserver(self)
-        //configureCanvas()
-        canvasView.becomeFirstResponder()
-        toolPicker.setVisible(true, forFirstResponder: canvasView)
-        restackScrollSubviewsForHitTesting()
-        activityIndicator.isHidden = true
+        ensureToolPickerForCanvas()
     }
     
     override func viewWillAppear(_ animated: Bool) {
+        ensureToolPickerForCanvas()
+    }
+    
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+        documentContainerView
+    }
+    
+    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) {
+        ensureToolPickerForCanvas()
+    }
+    
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        updateScrollInteractionForZoomAndMode()
+        centerDocumentContainerInScrollView()
+    }
+    
+    func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+        updateScrollInteractionForZoomAndMode()
+        centerDocumentContainerInScrollView()
+    }
+    
+    private func ensureToolPickerForCanvas() {
         toolPicker = PKToolPicker()
-        toolPicker.setVisible(true, forFirstResponder: canvasView)
         toolPicker.addObserver(self)
-        //configureCanvas()
-        canvasView.becomeFirstResponder()
         toolPicker.setVisible(true, forFirstResponder: canvasView)
+        canvasView.becomeFirstResponder()
         restackScrollSubviewsForHitTesting()
         activityIndicator.isHidden = true
     }
     
-    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
-        return imageView
+    /// Pan the enlarged page when zoomed in; in pen mode at 1× keep scroll off so drawing gets touches.
+    private func updateScrollInteractionForZoomAndMode() {
+        guard scrollView != nil else { return }
+        let zoomed = scrollView.zoomScale > scrollView.minimumZoomScale + 0.001
+        if !canvasView.isUserInteractionEnabled {
+            scrollView.isScrollEnabled = true
+        } else {
+            scrollView.isScrollEnabled = zoomed
+        }
+    }
+    
+    private func centerDocumentContainerInScrollView() {
+        guard documentContainerView != nil else { return }
+        let offsetX = max((scrollView.bounds.width - scrollView.contentSize.width) * 0.5, 0)
+        let offsetY = max((scrollView.bounds.height - scrollView.contentSize.height) * 0.5, 0)
+        var frame = documentContainerView.frame
+        frame.origin = CGPoint(x: offsetX, y: offsetY)
+        documentContainerView.frame = frame
+    }
+    
+    private func syncSubviewFramesToDocumentContainer() {
+        guard documentContainerView != nil else { return }
+        let b = documentContainerView.bounds
+        imageView.frame = b
+        overlayImageView.frame = b
+        canvasView.frame = b
+        stickerContainerView.frame = b
     }
     
     func startTimer() {
@@ -435,22 +484,8 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         }
         
     func timerFired() {
-        // Do something when the timer fires
         print("Timer fired after 2 seconds!")
-        scrollView.isScrollEnabled = false
-    }
-    
-    @objc func handlePinchGesture(_ recognizer: UIPinchGestureRecognizer) {
-            guard let view = recognizer.view else { return }
-        toolPicker = PKToolPicker()
-        toolPicker.setVisible(true, forFirstResponder: canvasView)
-        toolPicker.addObserver(self)
-        //configureCanvas()
-        canvasView.becomeFirstResponder()
-        toolPicker.setVisible(true, forFirstResponder: canvasView)
-        restackScrollSubviewsForHitTesting()
-        activityIndicator.isHidden = true
-        
+        updateScrollInteractionForZoomAndMode()
     }
     
 
@@ -919,12 +954,16 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             width: view.bounds.width,
             height: view.bounds.height - topMargin - bottomBarHeight - view.safeAreaInsets.bottom
         )
-        scrollView.contentSize = scrollView.bounds.size
         
-        if canvasView != nil {
-            imageView.frame = scrollView.bounds
-            overlayImageView.frame = scrollView.bounds
-            canvasView.frame = scrollView.bounds
+        guard documentContainerView != nil else { return }
+        
+        // At 1× zoom, pin the document container to the visible area. Avoid fighting `UIScrollView` while zooming.
+        if !scrollView.isZooming && abs(scrollView.zoomScale - scrollView.minimumZoomScale) < 0.0001 {
+            documentContainerView.frame = CGRect(origin: .zero, size: scrollView.bounds.size)
+            syncSubviewFramesToDocumentContainer()
+            scrollView.contentSize = documentContainerView.bounds.size
+        } else if !scrollView.isZooming {
+            centerDocumentContainerInScrollView()
         }
        }
     
@@ -1127,9 +1166,9 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
 
     private func restackScrollSubviewsForHitTesting() {
         let views = [imageView, overlayImageView, canvasView, stickerContainerView].compactMap { $0 }
-        views.forEach { view in
-            if view.superview == scrollView {
-                scrollView.bringSubviewToFront(view)
+        views.forEach { sub in
+            if sub.superview == documentContainerView {
+                documentContainerView.bringSubviewToFront(sub)
             }
         }
     }
@@ -1137,6 +1176,14 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     
     private func updatePageUI(animated: Bool) {
         guard !pdfPageImages.isEmpty else { return }
+        
+        scrollView.setZoomScale(scrollView.minimumZoomScale, animated: false)
+        if documentContainerView != nil {
+            documentContainerView.frame = CGRect(origin: .zero, size: scrollView.bounds.size)
+            syncSubviewFramesToDocumentContainer()
+            scrollView.contentSize = documentContainerView.bounds.size
+        }
+        updateScrollInteractionForZoomAndMode()
         
         resetLivePageLayers()
         
