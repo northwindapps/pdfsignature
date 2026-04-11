@@ -604,26 +604,36 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
 //        }
 //    }
     
+    /// Full logical page at the page image’s scale — not a snapshot of the scroll view’s visible viewport.
     func renderPageForExport() -> UIImage {
-        let pageSize = pdfPageImages[currentPageIndex].size
-
-        UIGraphicsBeginImageContextWithOptions(pageSize, false, 0)
-        defer { UIGraphicsEndImageContext() }
-
-        // Draw base PDF page
-        pdfPageImages[currentPageIndex].draw(in: CGRect(origin: .zero, size: pageSize))
+        let idx = currentPageIndex
+        let base = pdfPageImages[idx]
+        let size = base.size
         
-        // Draw pen strokes
-        let drawingImage = canvasView.drawing.image(from: canvasView.bounds, scale: 1.0)
-        drawingImage.draw(in: CGRect(origin: .zero, size: pageSize))
-
-        // Draw all sticker images
-        for sticker in stickerContainerView.subviews where sticker is UIImageView {
-            guard let imageView = sticker as? UIImageView else { continue }
-            imageView.image?.draw(in: imageView.frame)
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        format.scale = base.scale
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        
+        return renderer.image { _ in
+            base.draw(in: CGRect(origin: .zero, size: size))
+            
+            if let overlay = pageStrokeOverlays[idx] {
+                let r = rectAspectFit(imageSize: overlay.size, in: CGRect(origin: .zero, size: size))
+                overlay.draw(in: r, blendMode: .normal, alpha: 1)
+            }
+            
+            let imageFrame = aspectFitFrame(for: base, in: imageView)
+            if imageFrame.width > 0, imageFrame.height > 0 {
+                let ink = canvasView.drawing.image(from: imageFrame, scale: base.scale)
+                let inkRect = rectAspectFit(imageSize: ink.size, in: CGRect(origin: .zero, size: size))
+                ink.draw(in: inkRect, blendMode: .normal, alpha: 1)
+            }
+            
+            if let stickerLayer = renderStickersOverlay(for: idx, targetSize: size, includeStrokes: false) {
+                stickerLayer.draw(in: CGRect(origin: .zero, size: size), blendMode: .normal, alpha: 1)
+            }
         }
-
-        return UIGraphicsGetImageFromCurrentImageContext() ?? pdfPageImages[currentPageIndex]
     }
     
     @objc func importPDF() {
@@ -876,14 +886,10 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
                 previous.draw(in: dest, blendMode: .normal, alpha: 1)
             }
             
-            // 2. New ink from canvas, aligned to the aspect-fit page rect (only valid while this page is on-screen).
-            let scaleX = baseImage.size.width / imageFrame.width
-            let scaleY = baseImage.size.height / imageFrame.height
-            
-            ctx.cgContext.translateBy(x: -imageFrame.origin.x * scaleX,
-                                      y: -imageFrame.origin.y * scaleY)
-            ctx.cgContext.scaleBy(x: scaleX, y: scaleY)
-            canvasView.layer.render(in: ctx.cgContext)
+            // 2. New ink: rasterize PKDrawing in page space (not layer.render — that follows scroll zoom/clipping).
+            let ink = canvasView.drawing.image(from: imageFrame, scale: baseImage.scale)
+            let inkRect = rectAspectFit(imageSize: ink.size, in: dest)
+            ink.draw(in: inkRect, blendMode: .normal, alpha: 1)
         }
     }
     
