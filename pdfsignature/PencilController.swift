@@ -190,7 +190,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
 //        overlayImageView.layer.borderWidth = 0.5
 //        overlayImageView.layer.borderColor = UIColor.black.cgColor
         
-        self.view.backgroundColor = .lightGray
+        self.view.backgroundColor = .systemGray6
         switchToPenMode()
         
         
@@ -265,6 +265,13 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             preferredStyle: .alert
         )
         
+        alert.addAction(UIAlertAction(title: "Shrink", style: .default, handler: { _ in
+                let scale: CGFloat = 1.0 / 1.3
+                UIView.animate(withDuration: 0.2) {
+                    sticker.transform = sticker.transform.scaledBy(x: scale, y: scale)
+                }
+            }))
+        
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Delete", style: .destructive, handler: { _ in
             sticker.removeFromSuperview()
@@ -272,6 +279,8 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         
         present(alert, animated: true)
     }
+    
+    
     
     func switchToPenMode() {
         // Enable drawing
