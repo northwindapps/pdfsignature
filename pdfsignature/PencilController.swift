@@ -1214,20 +1214,50 @@ class CustomCanvasView: PKCanvasView {
         }
     }
     
+    /// Thins existing ink. PencilKit stroke width lives in each `PKStrokePoint.size`; the old implementation
+    /// only resampled path length and left `size` unchanged, so Adjust barely changed thickness and hit an
+    /// effective “minimum” too quickly on iPhone.
     func shrinkStrokes(by factor: CGFloat) {
-        guard factor > 0 else { return }
-
+        guard factor > 1 else { return }
+        
+        let minPointSize = minimumStrokePointSize()
         var newStrokes = [PKStroke]()
-
+        
         for stroke in self.drawing.strokes {
-            let originalLength = stroke.path.length()
-            let newPath = stroke.path.resampled(to: originalLength / factor)
-            let newStroke = PKStroke(ink: stroke.ink, path: newPath, transform: stroke.transform, mask: stroke.mask)
-            newStrokes.append(newStroke)
+            let path = stroke.path
+            var newPoints = [PKStrokePoint]()
+            newPoints.reserveCapacity(path.count)
+            
+            for i in 0..<path.count {
+                let p = path[i]
+                let nw = max(minPointSize, p.size.width / factor)
+                let nh = max(minPointSize, p.size.height / factor)
+                newPoints.append(PKStrokePoint(
+                    location: p.location,
+                    timeOffset: p.timeOffset,
+                    size: CGSize(width: nw, height: nh),
+                    opacity: p.opacity,
+                    force: p.force,
+                    azimuth: p.azimuth,
+                    altitude: p.altitude
+                ))
+            }
+            
+            let newPath = PKStrokePath(controlPoints: newPoints, creationDate: path.creationDate)
+            newStrokes.append(PKStroke(ink: stroke.ink, path: newPath, transform: stroke.transform, mask: stroke.mask))
         }
-
-        // Set the new drawing with shrunken strokes
+        
         self.drawing = PKDrawing(strokes: newStrokes)
+    }
+    
+    /// Smallest allowed per-point ink size (points) so strokes can go hairline on phone without collapsing to zero.
+    private func minimumStrokePointSize() -> CGFloat {
+        let displayScale = window?.screen.scale ?? UIScreen.main.scale
+        // ~0.25–0.33 pt on 3x phones is sub-pixel; still enough for PencilKit to render a visible hairline.
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            return max(0.1, 0.3 / displayScale)
+        }
+        return max(0.15, 0.45 / displayScale)
     }
     
     func addStroke(at points: [CGPoint], with color: UIColor = .black, width: CGFloat = 5.0) {
