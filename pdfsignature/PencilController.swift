@@ -434,6 +434,31 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         centerDocumentContainerInScrollView()
     }
     
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        presentResetZoomPromptIfAppropriate()
+    }
+    
+    /// When the user pans the zoomed document in pen mode, offer to reset zoom so drawing is easier.
+    private func presentResetZoomPromptIfAppropriate() {
+        guard presentedViewController == nil else { return }
+        guard scrollView.zoomScale > scrollView.minimumZoomScale + 0.001 else { return }
+        guard canvasView.isUserInteractionEnabled else { return }
+        
+        let alert = UIAlertController(
+            title: "Reset zoom?",
+            message: "You’re zoomed in. Reset to the original size so you can draw strokes more easily.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Reset zoom", style: .default) { [weak self] _ in
+            guard let self = self else { return }
+            self.scrollView.setZoomScale(self.scrollView.minimumZoomScale, animated: true)
+            self.centerDocumentContainerInScrollView()
+            self.updateScrollInteractionForZoomAndMode()
+        })
+        alert.addAction(UIAlertAction(title: "Continue panning", style: .cancel))
+        present(alert, animated: true)
+    }
+    
     private func ensureToolPickerForCanvas() {
         toolPicker = PKToolPicker()
         toolPicker.addObserver(self)
