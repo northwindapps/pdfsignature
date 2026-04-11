@@ -456,9 +456,10 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     @objc func scaleDown() {
         //canvasView.drawing = PKDrawing()
         //scrollView.setZoomScale(scrollView.maximumZoomScale, animated: true)
-        canvasView.shrinkStrokes(by: 1.3)
+        canvasView.shrinkDrawingCompletely(by: 1.3)
     }
     
+
     
     
     /// Merges live canvas ink into `pageStrokeOverlays` for the current page. Returns `false` if there was nothing to commit or capture failed.
@@ -1214,20 +1215,57 @@ class CustomCanvasView: PKCanvasView {
         }
     }
     
-    func shrinkStrokes(by factor: CGFloat) {
-        guard factor > 0 else { return }
+    func shrinkDrawingInPlace(by factor: CGFloat) {
+        let drawing = self.drawing
+        guard !drawing.strokes.isEmpty, factor > 0 else { return }
 
-        var newStrokes = [PKStroke]()
+        let scale = 1.0 / factor
+        let bounds = drawing.bounds
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
 
-        for stroke in self.drawing.strokes {
-            let originalLength = stroke.path.length()
-            let newPath = stroke.path.resampled(to: originalLength / factor)
-            let newStroke = PKStroke(ink: stroke.ink, path: newPath, transform: stroke.transform, mask: stroke.mask)
-            newStrokes.append(newStroke)
+        // 1. 中心を基準にするための変形（移動 -> 縮小 -> 戻す）
+        var transform = CGAffineTransform.identity
+        transform = transform.translatedBy(x: center.x, y: center.y)
+        transform = transform.scaledBy(x: scale, y: scale)
+        transform = transform.translatedBy(x: -center.x, y: -center.y)
+
+        // 2. 座標と長さを変形
+        let transformedDrawing = drawing.transformed(using: transform)
+
+        // 3. 線の「太さ」も個別に調整（ここをしないと線だけ太いままになる）
+        let newStrokes = transformedDrawing.strokes.map { stroke -> PKStroke in
+            let newPoints = stroke.path.map { point -> PKStrokePoint in
+                let newSize = CGSize(width: point.size.width * scale,
+                                    height: point.size.height * scale)
+                return PKStrokePoint(location: point.location, timeOffset: point.timeOffset,
+                                     size: newSize, opacity: point.opacity, force: point.force,
+                                     azimuth: point.azimuth, altitude: point.altitude)
+            }
+            let newPath = PKStrokePath(controlPoints: newPoints, creationDate: stroke.path.creationDate)
+            return PKStroke(ink: stroke.ink, path: newPath, transform: .identity, mask: stroke.mask)
         }
 
-        // Set the new drawing with shrunken strokes
         self.drawing = PKDrawing(strokes: newStrokes)
+    }
+
+    
+    func shrinkDrawingCompletely(by factor: CGFloat) {
+        let drawing = self.drawing
+        guard !drawing.strokes.isEmpty, factor > 0 else { return }
+
+        let scale = 1.0 / factor
+        let bounds = drawing.bounds
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+
+        //Keep drawing in the center
+        var transform = CGAffineTransform.identity
+        transform = transform.translatedBy(x: center.x, y: center.y)
+        transform = transform.scaledBy(x: scale, y: scale)
+        transform = transform.translatedBy(x: -center.x, y: -center.y)
+
+        let transformedDrawing = drawing.transformed(using: transform)
+
+        self.drawing = transformedDrawing
     }
     
     func addStroke(at points: [CGPoint], with color: UIColor = .black, width: CGFloat = 5.0) {
