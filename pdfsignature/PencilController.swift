@@ -651,14 +651,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             let imageFrame = aspectFitFrame(for: base, in: imageView)
             if imageFrame.width > 0, imageFrame.height > 0 {
                 // Render canvas at 3x scale for high-resolution strokes
-                let renderScale: CGFloat = 3.0
-                let scaledImageFrame = CGRect(
-                    x: imageFrame.origin.x * renderScale,
-                    y: imageFrame.origin.y * renderScale,
-                    width: imageFrame.width * renderScale,
-                    height: imageFrame.height * renderScale
-                )
-                let ink = canvasView.drawing.image(from: scaledImageFrame, scale: base.scale * renderScale)
+                let ink = canvasView.drawing.image(from: imageFrame, scale: base.scale * 3.0)
                 let inkRect = rectAspectFit(imageSize: ink.size, in: CGRect(origin: .zero, size: size))
                 ink.draw(in: inkRect, blendMode: .normal, alpha: 1)
             }
@@ -921,15 +914,8 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             }
             
             // 2. New ink: rasterize PKDrawing in page space at high resolution
-            // Render at 3x scale for crisp, smooth strokes
-            let renderScale: CGFloat = 3.0
-            let scaledImageFrame = CGRect(
-                x: imageFrame.origin.x * renderScale,
-                y: imageFrame.origin.y * renderScale,
-                width: imageFrame.width * renderScale,
-                height: imageFrame.height * renderScale
-            )
-            let ink = canvasView.drawing.image(from: scaledImageFrame, scale: baseImage.scale * renderScale)
+            // Use 3x scale for crisp strokes (higher DPI without changing the rectangle)
+            let ink = canvasView.drawing.image(from: imageFrame, scale: baseImage.scale * 3.0)
             let inkRect = rectAspectFit(imageSize: ink.size, in: dest)
             ink.draw(in: inkRect, blendMode: .normal, alpha: 1)
         }
