@@ -438,25 +438,8 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         presentResetZoomPromptIfAppropriate()
     }
     
-    /// When the user pans the zoomed document in pen mode, offer to reset zoom so drawing is easier.
     private func presentResetZoomPromptIfAppropriate() {
-        guard presentedViewController == nil else { return }
-        guard scrollView.zoomScale > scrollView.minimumZoomScale + 0.001 else { return }
-        guard canvasView.isUserInteractionEnabled else { return }
-        
-        let alert = UIAlertController(
-            title: "Reset zoom?",
-            message: "You’re zoomed in. Reset to the original size so you can draw strokes more easily.",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "Reset zoom", style: .default) { [weak self] _ in
-            guard let self = self else { return }
-            self.scrollView.setZoomScale(self.scrollView.minimumZoomScale, animated: true)
-            self.centerDocumentContainerInScrollView()
-            self.updateScrollInteractionForZoomAndMode()
-        })
-        alert.addAction(UIAlertAction(title: "Continue panning", style: .cancel))
-        present(alert, animated: true)
+        scrollView.isScrollEnabled = false
     }
     
     private func ensureToolPickerForCanvas() {
@@ -490,6 +473,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     
     private func syncSubviewFramesToDocumentContainer() {
         guard documentContainerView != nil else { return }
+        guard stickerContainerView != nil else { return }
         let b = documentContainerView.bounds
         imageView.frame = b
         overlayImageView.frame = b
@@ -617,17 +601,6 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         }
     }
 
-    
-//    @objc func switchInput() {
-//        scrollView.isScrollEnabled = !scrollView.isScrollEnabled
-//        if scrollView.isScrollEnabled{
-//            inputBtn.setTitle("Mode:s", for: .normal)
-//        }
-//        
-//        if !scrollView.isScrollEnabled{
-//            inputBtn.setTitle("Mode:w", for: .normal)
-//        }
-//    }
     
     /// Full logical page at the page image’s scale — not a snapshot of the scroll view’s visible viewport.
     func renderPageForExport() -> UIImage {
