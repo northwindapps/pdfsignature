@@ -301,8 +301,8 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         // Disable sticker movement (optional but recommended)
         stickerContainerView.isUserInteractionEnabled = false
         
-        // Set pen tool
-        let penTool = PKInkingTool(.pen, color: .black, width: 3)
+        // Set pen tool with slightly thinner width (better rendering quality)
+        let penTool = PKInkingTool(.pen, color: .black, width: 1.5)
         canvasView.tool = penTool
         
         updateScrollInteractionForZoomAndMode()
@@ -536,7 +536,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     private func commitCurrentPageStrokesIfNeeded() -> Bool {
         guard !canvasView.drawing.strokes.isEmpty else { return false }
         
-        let penTool = PKInkingTool(.pen, color: .black, width: 2)
+        let penTool = PKInkingTool(.pen, color: .black, width: 1.5)
         canvasView.tool = penTool
         
         guard let overlay = takeScreenshotCorrect(forPageIndex: currentPageIndex) else { return false }
@@ -558,7 +558,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     }
     
     @objc func exportPDF() {
-        let penTool = PKInkingTool(.pen, color: .black, width: 2)
+        let penTool = PKInkingTool(.pen, color: .black, width: 1.5)
         canvasView.tool = penTool
         
         // If there are uncommitted strokes on the current page, commit them before exporting.
@@ -650,7 +650,15 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             
             let imageFrame = aspectFitFrame(for: base, in: imageView)
             if imageFrame.width > 0, imageFrame.height > 0 {
-                let ink = canvasView.drawing.image(from: imageFrame, scale: base.scale)
+                // Render canvas at 3x scale for high-resolution strokes
+                let renderScale: CGFloat = 3.0
+                let scaledImageFrame = CGRect(
+                    x: imageFrame.origin.x * renderScale,
+                    y: imageFrame.origin.y * renderScale,
+                    width: imageFrame.width * renderScale,
+                    height: imageFrame.height * renderScale
+                )
+                let ink = canvasView.drawing.image(from: scaledImageFrame, scale: base.scale * renderScale)
                 let inkRect = rectAspectFit(imageSize: ink.size, in: CGRect(origin: .zero, size: size))
                 ink.draw(in: inkRect, blendMode: .normal, alpha: 1)
             }
@@ -887,6 +895,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     
     /// Builds a transparent bitmap of committed ink in page space (same size as the page raster).
     /// Uses `pdfPageImages[pageIndex]` (not `imageView.image`) so commits never composite against the wrong page after a fast page change.
+    /// Renders at 3x scale for high-resolution strokes that maintain quality when zoomed.
     func takeScreenshotCorrect(forPageIndex pageIndex: Int) -> UIImage? {
         guard pdfPageImages.indices.contains(pageIndex) else { return nil }
         let baseImage = pdfPageImages[pageIndex]
@@ -911,8 +920,16 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
                 previous.draw(in: dest, blendMode: .normal, alpha: 1)
             }
             
-            // 2. New ink: rasterize PKDrawing in page space (not layer.render — that follows scroll zoom/clipping).
-            let ink = canvasView.drawing.image(from: imageFrame, scale: baseImage.scale)
+            // 2. New ink: rasterize PKDrawing in page space at high resolution
+            // Render at 3x scale for crisp, smooth strokes
+            let renderScale: CGFloat = 3.0
+            let scaledImageFrame = CGRect(
+                x: imageFrame.origin.x * renderScale,
+                y: imageFrame.origin.y * renderScale,
+                width: imageFrame.width * renderScale,
+                height: imageFrame.height * renderScale
+            )
+            let ink = canvasView.drawing.image(from: scaledImageFrame, scale: baseImage.scale * renderScale)
             let inkRect = rectAspectFit(imageSize: ink.size, in: dest)
             ink.draw(in: inkRect, blendMode: .normal, alpha: 1)
         }
