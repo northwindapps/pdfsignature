@@ -96,7 +96,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "497"
             endingLineNumber = "497"
-            landmarkName = "timerFired()"
+            landmarkName = "syncSubviewFramesToDocumentContainer()"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
@@ -112,7 +112,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "459"
             endingLineNumber = "459"
-            landmarkName = "updateScrollInteractionForZoomAndMode()"
+            landmarkName = "presentResetZoomPromptIfAppropriate()"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
@@ -128,7 +128,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "462"
             endingLineNumber = "462"
-            landmarkName = "updateScrollInteractionForZoomAndMode()"
+            landmarkName = "ensureToolPickerForCanvas()"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
@@ -144,7 +144,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "461"
             endingLineNumber = "461"
-            landmarkName = "updateScrollInteractionForZoomAndMode()"
+            landmarkName = "ensureToolPickerForCanvas()"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>

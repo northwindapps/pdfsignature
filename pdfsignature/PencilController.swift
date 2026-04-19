@@ -269,10 +269,26 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     @objc func handleStickerDoubleTapToDelete(_ gesture: UITapGestureRecognizer) {
         guard let sticker = gesture.view else { return }
         
+        // Calculate approximate size in mm
+        let pdfSize = pdfPageImages[currentPageIndex].size
+        let viewSize = imageView.bounds.size
+        let scale = min(viewSize.width / pdfSize.width, viewSize.height / pdfSize.height)
+        let pdfScale = 1.0 / scale
+        
+        let baseSize = sticker.bounds.size
+        let scaleX = sqrt(sticker.transform.a * sticker.transform.a + sticker.transform.b * sticker.transform.b)
+        let scaleY = sqrt(sticker.transform.c * sticker.transform.c + sticker.transform.d * sticker.transform.d)
+        let currentSize = CGSize(width: baseSize.width * scaleX, height: baseSize.height * scaleY)
+        
+        let stickerSizeInPdf = CGSize(width: currentSize.width * pdfScale, height: currentSize.height * pdfScale)
+        let mmPerPoint: CGFloat = 25.4 / 72.0
+        let widthMm = stickerSizeInPdf.width * mmPerPoint
+        let heightMm = stickerSizeInPdf.height * mmPerPoint
+        
         // Optional: add a confirmation alert
         let alert = UIAlertController(
             title: "Delete Sticker?",
-            message: "Do you want to remove this sticker?",
+            message: "Do you want to remove this sticker?\nCurrent size: \(String(format: "%.1f", widthMm)) x \(String(format: "%.1f", heightMm)) mm",
             preferredStyle: .alert
         )
         
