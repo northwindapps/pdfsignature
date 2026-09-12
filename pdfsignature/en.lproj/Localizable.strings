@@ -6,6 +6,7 @@
 "Import" = "Import";
 "Pages" = "Pages";
 "Images" = "Images";
+"Fields" = "Fields";
 
 /* Sticker delete confirmation */
 "Delete Sticker?" = "Delete Sticker?";
@@ -17,6 +18,7 @@
 /* Toasts */
 "Pen mode enabled ✏️" = "Pen mode enabled ✏️";
 "Image mode enabled 🖼️" = "Image mode enabled 🖼️";
+"Fill Form mode enabled 📝" = "Fill Form mode enabled 📝";
 "PDF saved ✅" = "PDF saved ✅";
 
 /* Export */

@@ -6,6 +6,7 @@
 "Import" = "导入";
 "Pages" = "页面";
 "Images" = "图片";
+"Fields" = "表单";
 
 /* Sticker delete confirmation */
 "Delete Sticker?" = "删除贴纸？";
@@ -17,6 +18,7 @@
 /* Toasts */
 "Pen mode enabled ✏️" = "已启用画笔模式 ✏️";
 "Image mode enabled 🖼️" = "已启用图片模式 🖼️";
+"Fill Form mode enabled 📝" = "已启用表单填写模式 📝";
 "PDF saved ✅" = "PDF 已保存 ✅";
 
 /* Export */

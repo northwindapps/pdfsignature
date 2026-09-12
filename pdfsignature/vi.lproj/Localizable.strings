@@ -6,6 +6,7 @@
 "Import" = "Nhập";
 "Pages" = "Trang";
 "Images" = "Hình ảnh";
+"Fields" = "Biểu mẫu";
 
 /* Sticker delete confirmation */
 "Delete Sticker?" = "Xóa nhãn dán?";
@@ -17,6 +18,7 @@
 /* Toasts */
 "Pen mode enabled ✏️" = "Đã bật chế độ bút ✏️";
 "Image mode enabled 🖼️" = "Đã bật chế độ hình ảnh 🖼️";
+"Fill Form mode enabled 📝" = "Đã bật chế độ điền biểu mẫu 📝";
 "PDF saved ✅" = "Đã lưu PDF ✅";
 
 /* Export */

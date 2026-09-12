@@ -4,7 +4,12 @@ import Vision
 import PencilKit
 import MessageUI
 
-class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanvasViewDelegate,PKToolPickerObserver , UIGestureRecognizerDelegate, UITextViewDelegate,MFMailComposeViewControllerDelegate, UINavigationControllerDelegate, UIScrollViewDelegate, UIDocumentPickerDelegate{
+/// A form-field overlay text field, tagged with the live `PDFAnnotation` it edits.
+private class FormFieldTextField: UITextField {
+    weak var formFieldAnnotation: PDFAnnotation?
+}
+
+class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanvasViewDelegate,PKToolPickerObserver , UIGestureRecognizerDelegate, UITextViewDelegate,MFMailComposeViewControllerDelegate, UINavigationControllerDelegate, UIScrollViewDelegate, UIDocumentPickerDelegate, UITextFieldDelegate{
 
     var canvasView = CustomCanvasView()
     var stickerContainerView: UIView!
@@ -36,6 +41,15 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     }
     private var pageStickers: [[StickerSnapshot]] = []
     private var currentPageIndex: Int = 0
+
+    // MARK: - Form field fill mode
+    var formFieldContainerView: UIView!
+    private var fieldsButton: UIButton!
+    /// Text-field AcroForm widgets per page, on the live `DocumentManager.shared.pdfDocument`.
+    /// Editing a field writes straight back to its `PDFAnnotation`, which is what gets exported.
+    private var pageFormFieldAnnotations: [[PDFAnnotation]] = []
+    private enum EditMode { case pen, image, formFill }
+    private var editMode: EditMode = .pen
     
     private let bottomBarHeight: CGFloat = 64
     private var bottomBar: UIView!
@@ -86,6 +100,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         pageDrawings = Array(repeating: PKDrawing(), count: pdfPageImages.count)
         pageStrokeOverlays = Array(repeating: nil, count: pdfPageImages.count)
         pageStickers = Array(repeating: [], count: pdfPageImages.count)
+        pageFormFieldAnnotations = detectFormFieldAnnotations(pageCount: pdfPageImages.count)
         currentPageIndex = 0
         
         // Create ImageView (base PDF page)
@@ -171,6 +186,11 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         imageButton.setTitle(NSLocalizedString("Images", comment: "Button: open the image picker"), for: .normal)
         imageButton.addTarget(self, action: #selector(openImagePicker), for: .touchUpInside)
 
+        fieldsButton = UIButton(type: .system)
+        fieldsButton.setTitle(NSLocalizedString("Fields", comment: "Button: fill in the PDF's form fields"), for: .normal)
+        fieldsButton.addTarget(self, action: #selector(switchToFormFillModeButtonTapped), for: .touchUpInside)
+        fieldsButton.isHidden = true
+
         // Add all buttons to the stack
         [topButtonStack.addArrangedSubview(penModeButton),
          topButtonStack.addArrangedSubview(adjustButton),
@@ -178,7 +198,8 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
          topButtonStack.addArrangedSubview(exportButton),
          topButtonStack.addArrangedSubview(importButton),
          topButtonStack.addArrangedSubview(pageBtn),
-         topButtonStack.addArrangedSubview(imageButton)]
+         topButtonStack.addArrangedSubview(imageButton),
+         topButtonStack.addArrangedSubview(fieldsButton)]
         
 
         activityIndicator.stopAnimating()
@@ -194,13 +215,25 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
 
         documentContainerView.addSubview(stickerContainerView)
         loadStickers(for: currentPageIndex)
-        
+
+        formFieldContainerView = UIView(frame: documentContainerView.bounds)
+        formFieldContainerView.backgroundColor = .clear
+        formFieldContainerView.isUserInteractionEnabled = false
+        formFieldContainerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        documentContainerView.addSubview(formFieldContainerView)
+        loadFormFields(for: currentPageIndex)
+
+        fieldsButton.isHidden = pageFormFieldAnnotations.allSatisfy { $0.isEmpty }
+
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)), name: UIResponder.keyboardWillShowNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide(_:)), name: UIResponder.keyboardWillHideNotification, object: nil)
+
 //        canvasView.layer.borderWidth = 0.5
 //        canvasView.layer.borderColor = UIColor.black.cgColor
-//        
+//
 //        overlayImageView.layer.borderWidth = 0.5
 //        overlayImageView.layer.borderColor = UIColor.black.cgColor
-        
+
         self.view.backgroundColor = .systemGray6
         switchToPenMode()
         
@@ -312,28 +345,45 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     
     
     func switchToPenMode() {
+        editMode = .pen
         // Enable drawing
         canvasView.isUserInteractionEnabled = true
         canvasView.becomeFirstResponder()
-        
-        // Disable sticker movement (optional but recommended)
+
+        // Disable sticker movement / form field editing (optional but recommended)
         stickerContainerView.isUserInteractionEnabled = false
-        
+        formFieldContainerView?.isUserInteractionEnabled = false
+
         // Set pen tool with slightly thinner width (better rendering quality)
         let penTool = PKInkingTool(.pen, color: .black, width: 1.5)
         canvasView.tool = penTool
-        
+
         updateScrollInteractionForZoomAndMode()
         showToast(NSLocalizedString("Pen mode enabled ✏️", comment: "Toast shown when switching to pen mode"))
     }
-    
+
     func switchToImageMode() {
+        editMode = .image
         scrollView.isScrollEnabled = true
 //        inputBtn.setTitle("Mode: Image", for: .normal)
         canvasView.isUserInteractionEnabled = false
-        
+
         stickerContainerView.isUserInteractionEnabled = true
+        formFieldContainerView?.isUserInteractionEnabled = false
         showToast(NSLocalizedString("Image mode enabled 🖼️", comment: "Toast shown when switching to image mode"))
+    }
+
+    @objc func switchToFormFillModeButtonTapped() {
+        switchToFormFillMode()
+    }
+
+    func switchToFormFillMode() {
+        editMode = .formFill
+        scrollView.isScrollEnabled = true
+        canvasView.isUserInteractionEnabled = false
+        stickerContainerView.isUserInteractionEnabled = false
+        formFieldContainerView?.isUserInteractionEnabled = true
+        showToast(NSLocalizedString("Fill Form mode enabled 📝", comment: "Toast shown when switching to form-fill mode"))
     }
     
     func showToast(_ message: String) {
@@ -497,6 +547,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         overlayImageView.frame = b
         canvasView.frame = b
         stickerContainerView.frame = b
+        formFieldContainerView?.frame = b
     }
     
     func startTimer() {
@@ -753,29 +804,34 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     }
 
     func saveStrokeToPDF() -> Data? {
-        // If we have an original PDF, add overlay annotations to it.
-        if let pdfURL = DocumentManager.shared.documentURL, let pdfDocument = PDFDocument(url: pdfURL) {
+        // Use the live, in-session document (not a fresh re-open from disk) so that any
+        // form-field values filled in via Fields mode are carried into the export too.
+        if let pdfDocument = DocumentManager.shared.pdfDocument {
             // Add an overlay annotation per page (strokes + stickers).
             let pageCount = min(pdfDocument.pageCount, pageStrokeOverlays.count, pageStickers.count)
             for pageIndex in 0..<pageCount {
                 guard let pdfPage = pdfDocument.page(at: pageIndex) else { continue }
-                
+
+                // Remove any overlay annotation from a previous export so re-exporting doesn't
+                // stack stale ink/sticker snapshots on top of the current one.
+                pdfPage.annotations.filter { $0 is PDFImageAnnotation }.forEach { pdfPage.removeAnnotation($0) }
+
                 let pdfPageBounds = pdfPage.bounds(for: .mediaBox)
-                
+
                 // Build a transparent overlay image for this page.
                 guard let composedOverlay = renderStickersOverlay(
                     for: pageIndex,
                     targetSize: pdfPageBounds.size
                 ) else { continue }
-                
+
                 let imageBounds = CGRect(x: 0, y: 0, width: pdfPageBounds.width, height: pdfPageBounds.height)
                 let annotation = PDFImageAnnotation(composedOverlay, bounds: imageBounds, properties: nil)
                 pdfPage.addAnnotation(annotation)
             }
-            
+
             return pdfDocument.dataRepresentation()
         }
-        
+
         // Otherwise, generate a new PDF from the rendered pages (base + overlays).
         guard !pdfPageImages.isEmpty else { return nil }
         
@@ -934,7 +990,94 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             stickerContainerView.addSubview(sticker)
         }
     }
-    
+
+    // MARK: - Form field fill mode
+
+    /// Scans the live `DocumentManager.shared.pdfDocument` (the same instance `saveStrokeToPDF()`
+    /// exports from) for AcroForm text-field widgets, per page.
+    private func detectFormFieldAnnotations(pageCount: Int) -> [[PDFAnnotation]] {
+        guard let pdfDocument = DocumentManager.shared.pdfDocument else {
+            return Array(repeating: [], count: pageCount)
+        }
+        var result: [[PDFAnnotation]] = []
+        for pageIndex in 0..<pageCount {
+            guard let page = pdfDocument.page(at: pageIndex) else {
+                result.append([])
+                continue
+            }
+            result.append(page.annotations.filter { $0.widgetFieldType == .text })
+        }
+        return result
+    }
+
+    /// Rebuilds the overlay `UITextField`s for `pageIndex` from the live PDF annotations.
+    /// Mirrors `loadStickers(for:)`, but there's no snapshot array to rebuild from: the
+    /// annotation itself (on the shared live `PDFDocument`) is already the persistent model.
+    private func loadFormFields(for pageIndex: Int) {
+        guard formFieldContainerView != nil else { return }
+        formFieldContainerView.subviews.forEach { $0.removeFromSuperview() }
+        guard pageFormFieldAnnotations.indices.contains(pageIndex),
+              pdfPageImages.indices.contains(pageIndex) else { return }
+
+        let pageImage = pdfPageImages[pageIndex]
+        let imageFrame = aspectFitFrame(for: pageImage, in: imageView)
+        guard imageFrame.width > 0, imageFrame.height > 0 else { return }
+        let scaleX = imageFrame.width / pageImage.size.width
+        let scaleY = imageFrame.height / pageImage.size.height
+
+        for annotation in pageFormFieldAnnotations[pageIndex] {
+            // PDFAnnotation.bounds is in PDF page-point space (bottom-left origin), the same
+            // space `pdfPageImages` were rasterized in 1:1, so only a Y-flip is needed before
+            // scaling into imageView's aspect-fit frame (same transform `convertPDFToPNG` uses).
+            let bounds = annotation.bounds
+            let flippedY = pageImage.size.height - bounds.maxY
+            let rect = CGRect(
+                x: imageFrame.origin.x + bounds.origin.x * scaleX,
+                y: imageFrame.origin.y + flippedY * scaleY,
+                width: bounds.width * scaleX,
+                height: bounds.height * scaleY
+            )
+
+            let textField = FormFieldTextField(frame: rect)
+            textField.text = annotation.widgetStringValue
+            textField.font = .systemFont(ofSize: max(10, rect.height * 0.6))
+            textField.borderStyle = .none
+            textField.backgroundColor = UIColor.systemYellow.withAlphaComponent(0.25)
+            textField.layer.borderColor = UIColor.systemBlue.withAlphaComponent(0.6).cgColor
+            textField.layer.borderWidth = 1
+            textField.layer.cornerRadius = 2
+            textField.delegate = self
+            textField.formFieldAnnotation = annotation
+            textField.addTarget(self, action: #selector(formFieldEditingChanged(_:)), for: .editingChanged)
+
+            formFieldContainerView.addSubview(textField)
+        }
+    }
+
+    @objc private func formFieldEditingChanged(_ textField: UITextField) {
+        guard let textField = textField as? FormFieldTextField else { return }
+        textField.formFieldAnnotation?.widgetStringValue = textField.text ?? ""
+    }
+
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        textField.resignFirstResponder()
+        return true
+    }
+
+    @objc private func keyboardWillShow(_ notification: Notification) {
+        guard editMode == .formFill,
+              let frameValue = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue,
+              scrollView != nil else { return }
+        let keyboardHeight = view.convert(frameValue.cgRectValue, from: nil).intersection(view.bounds).height
+        scrollView.contentInset.bottom = keyboardHeight
+        scrollView.verticalScrollIndicatorInsets.bottom = keyboardHeight
+    }
+
+    @objc private func keyboardWillHide(_ notification: Notification) {
+        scrollView?.contentInset.bottom = 0
+        scrollView?.verticalScrollIndicatorInsets.bottom = 0
+    }
+
     /// Builds a transparent bitmap of committed ink in page space (same size as the page raster).
     /// Uses `pdfPageImages[pageIndex]` (not `imageView.image`) so commits never composite against the wrong page after a fast page change.
     /// Renders at 3x scale for high-resolution strokes that maintain quality when zoomed.
@@ -1243,15 +1386,16 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     
     
     
-    /// Clears live editing views so the previous page’s ink/stickers never flash on the next page.
+    /// Clears live editing views so the previous page’s ink/stickers/fields never flash on the next page.
     private func resetLivePageLayers() {
         canvasView.drawing = PKDrawing()
         overlayImageView.image = nil
         stickerContainerView?.subviews.forEach { $0.removeFromSuperview() }
+        formFieldContainerView?.subviews.forEach { $0.removeFromSuperview() }
     }
 
     private func restackScrollSubviewsForHitTesting() {
-        let views = [imageView, overlayImageView, canvasView, stickerContainerView].compactMap { $0 }
+        let views = [imageView, overlayImageView, canvasView, stickerContainerView, formFieldContainerView].compactMap { $0 }
         views.forEach { sub in
             if sub.superview == documentContainerView {
                 documentContainerView.bringSubviewToFront(sub)
@@ -1278,6 +1422,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         canvasView.drawing = pageDrawings[currentPageIndex]
         canvasView.layoutIfNeeded()
         loadStickers(for: currentPageIndex)
+        loadFormFields(for: currentPageIndex)
         restackScrollSubviewsForHitTesting()
         saveButton.isHidden = true
         

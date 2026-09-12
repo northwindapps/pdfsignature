@@ -53,6 +53,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
 
         DocumentManager.shared.documentURL = destURL
+        DocumentManager.shared.pdfDocument = PDFDocument(url: destURL)
         if let firstImage = renderFirstPage(of: destURL) {
             DocumentManager.shared.document = firstImage
         }

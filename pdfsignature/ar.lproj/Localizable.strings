@@ -6,6 +6,7 @@
 "Import" = "استيراد";
 "Pages" = "الصفحات";
 "Images" = "الصور";
+"Fields" = "الحقول";
 
 /* Sticker delete confirmation */
 "Delete Sticker?" = "هل تريد حذف الملصق؟";
@@ -17,6 +18,7 @@
 /* Toasts */
 "Pen mode enabled ✏️" = "تم تفعيل وضع القلم ✏️";
 "Image mode enabled 🖼️" = "تم تفعيل وضع الصور 🖼️";
+"Fill Form mode enabled 📝" = "تم تفعيل وضع تعبئة النموذج 📝";
 "PDF saved ✅" = "تم حفظ PDF ✅";
 
 /* Export */

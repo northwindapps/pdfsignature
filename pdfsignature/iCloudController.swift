@@ -90,6 +90,7 @@ class iCloudController: UIViewController,UIDocumentMenuDelegate,UIDocumentPicker
         
         if url.absoluteString.contains(".pdf"){
             DocumentManager.shared.documentURL = url
+            DocumentManager.shared.pdfDocument = PDFDocument(url: url)
         }
         
         if let pdfURL = DocumentManager.shared.documentURL {
