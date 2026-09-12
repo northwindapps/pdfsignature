@@ -1219,33 +1219,41 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     
     func convertPDFToPNG(pdfURL: URL) -> [UIImage]? {
         guard let pdfDocument = PDFDocument(url: pdfURL) else { return nil }
-        
+
         var pngImages: [UIImage] = []
-        
+
         // Loop through each page in the PDF
         for pageIndex in 0..<pdfDocument.pageCount {
             guard let pdfPage = pdfDocument.page(at: pageIndex) else { continue }
-            
+
+            // Strip text-field widgets before rasterizing this (throwaway, local) document.
+            // Fields mode already shows their live value via its own text-field overlay, so
+            // drawing the widget's appearance here too would double-render it — most visibly
+            // when reimporting a PDF whose fields were already filled in a previous session.
+            for annotation in pdfPage.annotations where annotation.widgetFieldType == .text {
+                pdfPage.removeAnnotation(annotation)
+            }
+
             // Get the PDF page's size and create a UIImage
             let pageRect = pdfPage.bounds(for: .mediaBox)
             let renderer = UIGraphicsImageRenderer(size: pageRect.size)
-            
+
             let image = renderer.image { ctx in
                 // Draw the page into the context
                 UIColor.white.set()
                 ctx.fill(pageRect)
                 ctx.cgContext.translateBy(x: 0, y: pageRect.size.height)
                 ctx.cgContext.scaleBy(x: 1, y: -1)
-                
+
                 pdfPage.draw(with: .mediaBox, to: ctx.cgContext)
             }
-            
+
             pngImages.append(image)
         }
-        
+
         return pngImages
     }
-    
+
     // MARK: - Page selector bar (multi-page)
     private func setupPageSelectorBar() {
         bottomBar = UIView()
