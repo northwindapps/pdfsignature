@@ -4,7 +4,7 @@ import Vision
 import PencilKit
 import MessageUI
 
-class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanvasViewDelegate,PKToolPickerObserver , UIGestureRecognizerDelegate, UITextViewDelegate,MFMailComposeViewControllerDelegate, UINavigationControllerDelegate, UIScrollViewDelegate{
+class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanvasViewDelegate,PKToolPickerObserver , UIGestureRecognizerDelegate, UITextViewDelegate,MFMailComposeViewControllerDelegate, UINavigationControllerDelegate, UIScrollViewDelegate, UIDocumentPickerDelegate{
 
     var canvasView = CustomCanvasView()
     var stickerContainerView: UIView!
@@ -560,21 +560,79 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
     @objc func exportPDF() {
         let penTool = PKInkingTool(.pen, color: .black, width: 1.5)
         canvasView.tool = penTool
-        
+
         // If there are uncommitted strokes on the current page, commit them before exporting.
         if !canvasView.drawing.strokes.isEmpty {
             _ = commitCurrentPageStrokesIfNeeded()
         }
-        
+
         // Persist current sticker positions before exporting.
         snapshotCurrentStickers()
-        
-        if let pdfData = saveStrokeToPDF() {
-            pdfEmail(data: pdfData)
+
+        guard let pdfData = saveStrokeToPDF() else {
+            canvasView.drawing = PKDrawing()
+            saveButton.isHidden = true
+            return
         }
-        
+
+        let alert = UIAlertController(title: "Export PDF", message: nil, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "Save to Files", style: .default, handler: { [weak self] _ in
+            self?.pdfSaveToFiles(data: pdfData)
+        }))
+        alert.addAction(UIAlertAction(title: "Email", style: .default, handler: { [weak self] _ in
+            self?.pdfEmail(data: pdfData)
+        }))
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        // iPad requires a source for popover-style action sheets.
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+            popover.permittedArrowDirections = []
+        }
+        present(alert, animated: true)
+
         canvasView.drawing = PKDrawing()
         saveButton.isHidden = true
+    }
+
+    private var pendingExportTempURL: URL?
+
+    // Writes the PDF data to a temp file, then lets the user pick a save location via the Files UI.
+    func pdfSaveToFiles(data: Data) {
+        let today = Date()
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "MM-dd-yyyy HH:mm"
+        let date = dateFormatter.string(from: today)
+
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("document-\(date).pdf")
+
+        do {
+            try data.write(to: tempURL)
+        } catch {
+            print("Failed to write temp PDF for export: \(error)")
+            return
+        }
+
+        pendingExportTempURL = tempURL
+
+        let documentPicker = UIDocumentPickerViewController(forExporting: [tempURL], asCopy: true)
+        documentPicker.delegate = self
+        present(documentPicker, animated: true)
+    }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        if let tempURL = pendingExportTempURL {
+            try? FileManager.default.removeItem(at: tempURL)
+            pendingExportTempURL = nil
+        }
+        showToast("PDF saved ✅")
+    }
+
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        if let tempURL = pendingExportTempURL {
+            try? FileManager.default.removeItem(at: tempURL)
+            pendingExportTempURL = nil
+        }
     }
     
     // Function to convert a UIImage to PDF
