@@ -1,0 +1,31 @@
+/* Toolbar buttons */
+"Pen" = "Bút";
+"Adjust" = "Điều chỉnh";
+"Save" = "Lưu";
+"Export" = "Xuất";
+"Import" = "Nhập";
+"Pages" = "Trang";
+"Images" = "Hình ảnh";
+
+/* Sticker delete confirmation */
+"Delete Sticker?" = "Xóa nhãn dán?";
+"Do you want to remove this sticker?\nCurrent size: %1$@ x %2$@ mm" = "Bạn có muốn xóa nhãn dán này không?\nKích thước hiện tại: %1$@ x %2$@ mm";
+"Shrink" = "Thu nhỏ";
+"Cancel" = "Hủy";
+"Delete" = "Xóa";
+
+/* Toasts */
+"Pen mode enabled ✏️" = "Đã bật chế độ bút ✏️";
+"Image mode enabled 🖼️" = "Đã bật chế độ hình ảnh 🖼️";
+"PDF saved ✅" = "Đã lưu PDF ✅";
+
+/* Export */
+"Here's your PDF" = "Đây là tệp PDF của bạn";
+"Export PDF" = "Xuất PDF";
+"Save to Files" = "Lưu vào Tệp";
+"Email" = "Email";
+
+/* Page navigation */
+"Page %1$d / %2$d" = "Trang %1$d / %2$d";
+"Previous Page" = "Trang trước";
+"Next Page" = "Trang sau";

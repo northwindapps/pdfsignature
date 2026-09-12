@@ -142,33 +142,33 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
 
         // Create buttons
         let penModeButton = UIButton(type: .system)
-        penModeButton.setTitle("Pen", for: .normal)
+        penModeButton.setTitle(NSLocalizedString("Pen", comment: "Button: switch to pen drawing mode"), for: .normal)
         penModeButton.addTarget(self, action: #selector(switchToPenModeButtonTapped), for: .touchUpInside)
 
         let adjustButton = UIButton(type: .system)
-        adjustButton.setTitle("Adjust", for: .normal)
+        adjustButton.setTitle(NSLocalizedString("Adjust", comment: "Button: shrink/scale the current drawing"), for: .normal)
         adjustButton.addTarget(self, action: #selector(scaleDown), for: .touchUpInside)
 
         saveButton = UIButton(type: .system)
-        saveButton.setTitle("Save", for: .normal)
+        saveButton.setTitle(NSLocalizedString("Save", comment: "Button: save the current pen strokes"), for: .normal)
         saveButton.setTitleColor(.red, for: .normal)
         saveButton.addTarget(self, action: #selector(saveStroke), for: .touchUpInside)
         saveButton.isHidden = true
 
         let exportButton = UIButton(type: .system)
-        exportButton.setTitle("Export", for: .normal)
+        exportButton.setTitle(NSLocalizedString("Export", comment: "Button: export the PDF"), for: .normal)
         exportButton.addTarget(self, action: #selector(exportPDF), for: .touchUpInside)
 
         let importButton = UIButton(type: .system)
-        importButton.setTitle("Import", for: .normal)
+        importButton.setTitle(NSLocalizedString("Import", comment: "Button: import a PDF"), for: .normal)
         importButton.addTarget(self, action: #selector(importPDF), for: .touchUpInside)
 
         pageBtn = UIButton(type: .system)
-        pageBtn.setTitle("Pages", for: .normal)
+        pageBtn.setTitle(NSLocalizedString("Pages", comment: "Button: go to next page"), for: .normal)
         pageBtn.addTarget(self, action: #selector(goToNextPage), for: .touchUpInside)
 
         let imageButton = UIButton(type: .system)
-        imageButton.setTitle("Images", for: .normal)
+        imageButton.setTitle(NSLocalizedString("Images", comment: "Button: open the image picker"), for: .normal)
         imageButton.addTarget(self, action: #selector(openImagePicker), for: .touchUpInside)
 
         // Add all buttons to the stack
@@ -286,21 +286,23 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         let heightMm = stickerSizeInPdf.height * mmPerPoint
         
         // Optional: add a confirmation alert
+        let sizeFormat = NSLocalizedString("Do you want to remove this sticker?\nCurrent size: %1$@ x %2$@ mm", comment: "Sticker delete confirmation message; %1$@ is width, %2$@ is height, both in millimeters")
+        let message = String(format: sizeFormat, String(format: "%.1f", widthMm), String(format: "%.1f", heightMm))
         let alert = UIAlertController(
-            title: "Delete Sticker?",
-            message: "Do you want to remove this sticker?\nCurrent size: \(String(format: "%.1f", widthMm)) x \(String(format: "%.1f", heightMm)) mm",
+            title: NSLocalizedString("Delete Sticker?", comment: "Sticker delete confirmation title"),
+            message: message,
             preferredStyle: .alert
         )
-        
-        alert.addAction(UIAlertAction(title: "Shrink", style: .default, handler: { _ in
+
+        alert.addAction(UIAlertAction(title: NSLocalizedString("Shrink", comment: "Sticker delete alert: shrink the sticker instead"), style: .default, handler: { _ in
                 let scale: CGFloat = 1.0 / 1.3
                 UIView.animate(withDuration: 0.2) {
                     sticker.transform = sticker.transform.scaledBy(x: scale, y: scale)
                 }
             }))
-        
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Delete", style: .destructive, handler: { _ in
+
+        alert.addAction(UIAlertAction(title: NSLocalizedString("Cancel", comment: "Cancel action"), style: .cancel))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("Delete", comment: "Sticker delete alert: confirm delete"), style: .destructive, handler: { _ in
             sticker.removeFromSuperview()
         }))
         
@@ -322,7 +324,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         canvasView.tool = penTool
         
         updateScrollInteractionForZoomAndMode()
-        showToast("Pen mode enabled ✏️")
+        showToast(NSLocalizedString("Pen mode enabled ✏️", comment: "Toast shown when switching to pen mode"))
     }
     
     func switchToImageMode() {
@@ -331,7 +333,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         canvasView.isUserInteractionEnabled = false
         
         stickerContainerView.isUserInteractionEnabled = true
-        showToast("Image mode enabled 🖼️")
+        showToast(NSLocalizedString("Image mode enabled 🖼️", comment: "Toast shown when switching to image mode"))
     }
     
     func showToast(_ message: String) {
@@ -402,7 +404,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             mail.mailComposeDelegate = self
 
             // Set the subject
-            mail.setSubject("Here's your PDF")
+            mail.setSubject(NSLocalizedString("Here's your PDF", comment: "Email subject line for the exported PDF"))
 
             // Attach PDF file (Update MIME type to "application/pdf")
             mail.addAttachmentData(data, mimeType: "application/pdf", fileName: "document-\(date).pdf")
@@ -575,14 +577,14 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             return
         }
 
-        let alert = UIAlertController(title: "Export PDF", message: nil, preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "Save to Files", style: .default, handler: { [weak self] _ in
+        let alert = UIAlertController(title: NSLocalizedString("Export PDF", comment: "Export action sheet title"), message: nil, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: NSLocalizedString("Save to Files", comment: "Export action: save PDF to Files"), style: .default, handler: { [weak self] _ in
             self?.pdfSaveToFiles(data: pdfData)
         }))
-        alert.addAction(UIAlertAction(title: "Email", style: .default, handler: { [weak self] _ in
+        alert.addAction(UIAlertAction(title: NSLocalizedString("Email", comment: "Export action: send PDF via email"), style: .default, handler: { [weak self] _ in
             self?.pdfEmail(data: pdfData)
         }))
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: NSLocalizedString("Cancel", comment: "Cancel action"), style: .cancel))
         // iPad requires a source for popover-style action sheets.
         if let popover = alert.popoverPresentationController {
             popover.sourceView = view
@@ -625,7 +627,7 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             try? FileManager.default.removeItem(at: tempURL)
             pendingExportTempURL = nil
         }
-        showToast("PDF saved ✅")
+        showToast(NSLocalizedString("PDF saved ✅", comment: "Toast shown after the PDF is saved to Files"))
     }
 
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
@@ -1115,15 +1117,18 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
             bottomBar.heightAnchor.constraint(equalToConstant: bottomBarHeight)
         ])
         
+        // SF Symbols "backward"/"forward" (rather than literal left/right arrows) auto-mirror
+        // for right-to-left layout, so "previous" and "next" stay visually correct in Arabic.
+        let chevronConfig = UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
         prevPageButton = UIButton(type: .system)
-        prevPageButton.setTitle("◀︎", for: .normal)
-        prevPageButton.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
+        prevPageButton.setImage(UIImage(systemName: "chevron.backward", withConfiguration: chevronConfig), for: .normal)
+        prevPageButton.accessibilityLabel = NSLocalizedString("Previous Page", comment: "Accessibility label for previous-page button")
         prevPageButton.addTarget(self, action: #selector(goToPreviousPage), for: .touchUpInside)
         prevPageButton.translatesAutoresizingMaskIntoConstraints = false
-        
+
         nextPageButton = UIButton(type: .system)
-        nextPageButton.setTitle("▶︎", for: .normal)
-        nextPageButton.titleLabel?.font = UIFont.systemFont(ofSize: 20, weight: .semibold)
+        nextPageButton.setImage(UIImage(systemName: "chevron.forward", withConfiguration: chevronConfig), for: .normal)
+        nextPageButton.accessibilityLabel = NSLocalizedString("Next Page", comment: "Accessibility label for next-page button")
         nextPageButton.addTarget(self, action: #selector(goToNextPage), for: .touchUpInside)
         nextPageButton.translatesAutoresizingMaskIntoConstraints = false
         
@@ -1277,7 +1282,8 @@ class PencilController: UIViewController, UIImagePickerControllerDelegate,PKCanv
         saveButton.isHidden = true
         
         let current = currentPageIndex + 1
-        pageStatusLabel.text = "Page \(current) / \(pdfPageImages.count)"
+        let pageFormat = NSLocalizedString("Page %1$d / %2$d", comment: "Page indicator; %1$d is current page, %2$d is total page count")
+        pageStatusLabel.text = String(format: pageFormat, current, pdfPageImages.count)
         
         prevPageButton.isEnabled = currentPageIndex > 0
         nextPageButton.isEnabled = currentPageIndex < pdfPageImages.count - 1

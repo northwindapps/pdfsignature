@@ -1,0 +1,31 @@
+/* Toolbar buttons */
+"Pen" = "Pen";
+"Adjust" = "Adjust";
+"Save" = "Save";
+"Export" = "Export";
+"Import" = "Import";
+"Pages" = "Pages";
+"Images" = "Images";
+
+/* Sticker delete confirmation */
+"Delete Sticker?" = "Delete Sticker?";
+"Do you want to remove this sticker?\nCurrent size: %1$@ x %2$@ mm" = "Do you want to remove this sticker?\nCurrent size: %1$@ x %2$@ mm";
+"Shrink" = "Shrink";
+"Cancel" = "Cancel";
+"Delete" = "Delete";
+
+/* Toasts */
+"Pen mode enabled ✏️" = "Pen mode enabled ✏️";
+"Image mode enabled 🖼️" = "Image mode enabled 🖼️";
+"PDF saved ✅" = "PDF saved ✅";
+
+/* Export */
+"Here's your PDF" = "Here's your PDF";
+"Export PDF" = "Export PDF";
+"Save to Files" = "Save to Files";
+"Email" = "Email";
+
+/* Page navigation */
+"Page %1$d / %2$d" = "Page %1$d / %2$d";
+"Previous Page" = "Previous Page";
+"Next Page" = "Next Page";

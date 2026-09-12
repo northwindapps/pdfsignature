@@ -1,0 +1,31 @@
+/* Toolbar buttons */
+"Pen" = "画笔";
+"Adjust" = "调整";
+"Save" = "保存";
+"Export" = "导出";
+"Import" = "导入";
+"Pages" = "页面";
+"Images" = "图片";
+
+/* Sticker delete confirmation */
+"Delete Sticker?" = "删除贴纸？";
+"Do you want to remove this sticker?\nCurrent size: %1$@ x %2$@ mm" = "您要删除此贴纸吗？\n当前尺寸：%1$@ x %2$@ 毫米";
+"Shrink" = "缩小";
+"Cancel" = "取消";
+"Delete" = "删除";
+
+/* Toasts */
+"Pen mode enabled ✏️" = "已启用画笔模式 ✏️";
+"Image mode enabled 🖼️" = "已启用图片模式 🖼️";
+"PDF saved ✅" = "PDF 已保存 ✅";
+
+/* Export */
+"Here's your PDF" = "这是您的 PDF 文件";
+"Export PDF" = "导出 PDF";
+"Save to Files" = "保存到文件";
+"Email" = "邮件";
+
+/* Page navigation */
+"Page %1$d / %2$d" = "第 %1$d 页 / 共 %2$d 页";
+"Previous Page" = "上一页";
+"Next Page" = "下一页";

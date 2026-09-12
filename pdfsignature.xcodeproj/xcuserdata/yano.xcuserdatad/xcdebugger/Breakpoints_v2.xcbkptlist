@@ -128,8 +128,8 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "462"
             endingLineNumber = "462"
-            landmarkName = "ensureToolPickerForCanvas()"
-            landmarkType = "7">
+            landmarkName = "PencilController"
+            landmarkType = "3">
          </BreakpointContent>
       </BreakpointProxy>
       <BreakpointProxy
@@ -144,7 +144,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "461"
             endingLineNumber = "461"
-            landmarkName = "ensureToolPickerForCanvas()"
+            landmarkName = "presentResetZoomPromptIfAppropriate()"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>

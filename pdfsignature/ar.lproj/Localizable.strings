@@ -1,0 +1,31 @@
+/* Toolbar buttons */
+"Pen" = "قلم";
+"Adjust" = "ضبط";
+"Save" = "حفظ";
+"Export" = "تصدير";
+"Import" = "استيراد";
+"Pages" = "الصفحات";
+"Images" = "الصور";
+
+/* Sticker delete confirmation */
+"Delete Sticker?" = "هل تريد حذف الملصق؟";
+"Do you want to remove this sticker?\nCurrent size: %1$@ x %2$@ mm" = "هل تريد إزالة هذا الملصق؟\nالحجم الحالي: %1$@ × %2$@ مم";
+"Shrink" = "تصغير";
+"Cancel" = "إلغاء";
+"Delete" = "حذف";
+
+/* Toasts */
+"Pen mode enabled ✏️" = "تم تفعيل وضع القلم ✏️";
+"Image mode enabled 🖼️" = "تم تفعيل وضع الصور 🖼️";
+"PDF saved ✅" = "تم حفظ PDF ✅";
+
+/* Export */
+"Here's your PDF" = "إليك ملف PDF الخاص بك";
+"Export PDF" = "تصدير PDF";
+"Save to Files" = "حفظ في الملفات";
+"Email" = "البريد الإلكتروني";
+
+/* Page navigation */
+"Page %1$d / %2$d" = "صفحة %1$d من %2$d";
+"Previous Page" = "الصفحة السابقة";
+"Next Page" = "الصفحة التالية";
